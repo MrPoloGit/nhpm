@@ -1032,13 +1032,14 @@ static nhp_err fetch_patch_bytes(const char *url, const cfg_app *app, net_resp *
         return NHP_OK;
     }
 
-    long wayback_http_code = out->http_code;
-    net_resp_free(out);
     if (err == NHP_OK) {
+        long wayback_http_code = out->http_code;
+        net_resp_free(out);
         err_set("could not download %s (HTTP %ld) or via the Wayback Machine (HTTP %ld)", url,
                 direct_http_code, wayback_http_code);
         return NHP_ENET;
     }
+    net_resp_free(out);
     return err;
 }
 

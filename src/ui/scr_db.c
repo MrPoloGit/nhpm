@@ -635,10 +635,15 @@ static void do_download(ui_app *app, bool add_to_instance)
             break;
         }
     }
-    if (sha256 != NULL) {
-        err = lib_version_diff_path(entry->id, version, &diff_path);
+    if (sha256 == NULL) {
+        set_action_status(app, "downloaded %s %s but could not stage it for the instance",
+                          entry->id, version);
+        free(version);
+        lib_patch_free(&lp);
+        return;
     }
-    if (sha256 == NULL || err != NHP_OK) {
+    err = lib_version_diff_path(entry->id, version, &diff_path);
+    if (err != NHP_OK) {
         set_action_status(app, "downloaded %s %s but could not stage it for the instance",
                           entry->id, version);
         free(version);
