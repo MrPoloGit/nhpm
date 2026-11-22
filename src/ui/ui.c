@@ -213,8 +213,8 @@ void ui_reload_active_instance(ui_app *app)
             } else if (lock_err == NHP_ELOCKED) {
                 app->active_read_only = true;
                 app->active_lock_other_pid = other_pid;
-                ui_set_status(app, "%s is open in another nhpm (pid %d) -- read-only",
-                              lock_target, (int)other_pid);
+                ui_set_status(app, "%s is open in another nhpm (pid %d) -- read-only", lock_target,
+                              (int)other_pid);
             }
             /* Any other inst_lock_acquire() error: proceed unlocked, same
              * as not having tried -- a later mutating action's own error

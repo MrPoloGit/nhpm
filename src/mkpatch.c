@@ -1607,14 +1607,15 @@ nhp_err mkp_from_folder(const char *folder, const mkp_base_spec *base, const mkp
         }
         free(tree_a);
     }
-    free(folder_version);
 
     if (err != NHP_OK) {
+        free(folder_version);
         return err;
     }
     if (diff_body[0] == '\0') {
         err_set("no changes found between %s and the given base", folder);
         free(diff_body);
+        free(folder_version);
         return NHP_ENOENT;
     }
 
@@ -1652,12 +1653,14 @@ nhp_err mkp_from_folder(const char *folder, const mkp_base_spec *base, const mkp
     err = fs_write_temp_file("nhpm-mkpatch", full_text, strlen(full_text), &diff_file_path);
     free(full_text);
     if (err != NHP_OK) {
+        free(folder_version);
         return err;
     }
 
     err = lib_import_local(diff_file_path, meta->name, hdr.author, target, version, out_id);
     (void)unlink(diff_file_path);
     free(diff_file_path);
+    free(folder_version);
     return err;
 }
 

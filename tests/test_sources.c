@@ -29,7 +29,7 @@ static int failures = 0;
         setenv("XDG_DATA_HOME", tmp_data_dir, 1);                                                  \
         body;                                                                                      \
         unsetenv("XDG_DATA_HOME");                                                                 \
-        char *chmod_argv_cmd = path_join(tmp_data_dir, "nhpm/sources");                         \
+        char *chmod_argv_cmd = path_join(tmp_data_dir, "nhpm/sources");                            \
         if (chmod_argv_cmd != NULL) {                                                              \
             make_tree_writable(chmod_argv_cmd);                                                    \
             free(chmod_argv_cmd);                                                                  \

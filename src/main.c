@@ -30,8 +30,7 @@ static void print_usage(FILE *out)
 {
     (void)fprintf(out, "usage: nhpm [--version] [--help] [--debug]\n");
     (void)fprintf(out, "       --debug (interface mode only): writes a timestamped activity log\n");
-    (void)fprintf(out,
-                  "       to $XDG_CACHE_HOME/nhpm/ (every status-line message, success or\n");
+    (void)fprintf(out, "       to $XDG_CACHE_HOME/nhpm/ (every status-line message, success or\n");
     (void)fprintf(out, "       failure); its path is printed once you quit\n");
     (void)fprintf(out, "       nhpm refresh\n");
     (void)fprintf(out, "       nhpm search [query]\n");
@@ -78,10 +77,10 @@ static void print_usage(FILE *out)
     (void)fprintf(out, "       nhpm capture <name> [--version V] [--author A] [--target T]\n"
                        "               [--desc TEXT] [--long-desc TEXT] [--files F...] "
                        "[--inst <name>]\n");
-    (void)fprintf(
-        out, "       nhpm mkpatch <folder> <name> [--from base|folder:P|tarball:P|git:REF]\n"
-             "               [--version V] [--author A] [--target T] [--desc TEXT]\n"
-             "               [--long-desc TEXT] [--files F...]\n");
+    (void)fprintf(out,
+                  "       nhpm mkpatch <folder> <name> [--from base|folder:P|tarball:P|git:REF]\n"
+                  "               [--version V] [--author A] [--target T] [--desc TEXT]\n"
+                  "               [--long-desc TEXT] [--files F...]\n");
     (void)fprintf(out, "       nhpm export-patch <id>[@version] [FILE]\n");
     (void)fprintf(out, "\n");
     (void)fprintf(out, "Run with no arguments to start the ncurses interface (docs/features.md\n");
@@ -843,8 +842,7 @@ static nhp_err resolve_instance_locked(int argc, char **argv, int from, inst_ins
     err = inst_lock_acquire(out->name, out_lock, &other_pid);
     if (err != NHP_OK) {
         if (err == NHP_ELOCKED) {
-            err_set("instance %s is locked by another nhpm (pid %ld)", out->name,
-                    (long)other_pid);
+            err_set("instance %s is locked by another nhpm (pid %ld)", out->name, (long)other_pid);
         }
         inst_free(out);
     }
@@ -866,8 +864,7 @@ static nhp_err lock_instance_by_name(const char *name, inst_lock *out_lock)
 
 static void print_patch_conflict(const stack_conflict *c)
 {
-    (void)fprintf(stderr, "nhpm: %s %s does not apply cleanly%s\n", c->patch_id,
-                  c->patch_version,
+    (void)fprintf(stderr, "nhpm: %s %s does not apply cleanly%s\n", c->patch_id, c->patch_version,
                   c->is_requested_patch ? "" : " (a later patch in the stack depends on it)");
     for (size_t i = 0; i < c->file_count; i++) {
         (void)fprintf(stderr, "  %-30s hunk %d of %d FAILED\n", c->files[i].path,
@@ -1673,8 +1670,8 @@ static int cmd_combined(int argc, char **argv)
         char *tmp_path = NULL;
         char *id = NULL;
         if (flat_err == NHP_OK) {
-            flat_err = fs_write_temp_file("nhpm-combined-flatten", result.diff,
-                                          strlen(result.diff), &tmp_path);
+            flat_err = fs_write_temp_file("nhpm-combined-flatten", result.diff, strlen(result.diff),
+                                          &tmp_path);
         }
         if (flat_err == NHP_OK) {
             flat_err = lib_import_local(tmp_path, flatten_name, "", inst.source, "1.0", &id);
@@ -1694,8 +1691,7 @@ static int cmd_combined(int argc, char **argv)
             (void)printf("Created %s with the combined patch applied.\n", flatten_name);
             inst_free(&new_inst);
         } else {
-            (void)fprintf(stderr, "nhpm: could not flatten into %s: %s\n", flatten_name,
-                          err_get());
+            (void)fprintf(stderr, "nhpm: could not flatten into %s: %s\n", flatten_name, err_get());
             exit_code = 1;
         }
         free(id);
@@ -1788,10 +1784,9 @@ static int cmd_changes(int argc, char **argv)
 static int cmd_capture(int argc, char **argv)
 {
     if (argc < 3) {
-        (void)fprintf(stderr,
-                      "usage: nhpm capture <name> [--version V] [--author A] [--target T]\n"
-                      "               [--desc TEXT] [--long-desc TEXT] [--files F...] "
-                      "[--inst <name>]\n");
+        (void)fprintf(stderr, "usage: nhpm capture <name> [--version V] [--author A] [--target T]\n"
+                              "               [--desc TEXT] [--long-desc TEXT] [--files F...] "
+                              "[--inst <name>]\n");
         return 1;
     }
     const char *name = argv[2];
@@ -1897,10 +1892,9 @@ static int cmd_mkpatch(int argc, char **argv)
 {
     if (argc < 4) {
         (void)fprintf(
-            stderr,
-            "usage: nhpm mkpatch <folder> <name> [--from base|folder:P|tarball:P|git:REF]\n"
-            "               [--version V] [--author A] [--target T] [--desc TEXT]\n"
-            "               [--long-desc TEXT] [--files F...]\n");
+            stderr, "usage: nhpm mkpatch <folder> <name> [--from base|folder:P|tarball:P|git:REF]\n"
+                    "               [--version V] [--author A] [--target T] [--desc TEXT]\n"
+                    "               [--long-desc TEXT] [--files F...]\n");
         return 1;
     }
     const char *folder = argv[2];

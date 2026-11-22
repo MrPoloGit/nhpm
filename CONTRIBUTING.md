@@ -10,18 +10,22 @@ make test       # build and run the unit/integration tests
 make format     # apply clang-format
 make lint       # clang-format --dry-run, banned-function check, clang-tidy, cppcheck
 make debug      # build with ASan/UBSan (see note below)
+make ci         # run every .github/workflows/ci.yml step locally, per available compiler
 ```
 
 `make lint` runs clang-tidy and cppcheck only if they're installed locally; CI always runs
 them. On macOS, `brew install llvm cppcheck` gets you both (`clang-tidy` ships inside `llvm`,
 not as a separate formula). Apple's bundled clang/ASan deadlocks during startup on some recent
-macOS versions; if `make debug` hangs, build with Homebrew's clang instead:
-`CC=$(brew --prefix llvm)/bin/clang make debug`. Also on macOS, running anything that makes a
+macOS versions; if `make debug` or the sanitizer pass inside `make ci` hangs, build with
+Homebrew's clang instead: `CC=$(brew --prefix llvm)/bin/clang make debug`, or
+`CC=$(brew --prefix llvm)/bin/clang make ci`. Also on macOS, running anything that makes a
 real network request (e.g. `nhpm download`) under LeakSanitizer reports leaks inside Apple's
 `Network.framework`/curl's async DNS thread; that's a known platform false positive, not a bug
 here -- check that the leak's stack trace has no `src/` frames before worrying about it.
 
-Every commit should build, and pass `make lint` and `make test`.
+Every commit should build, and pass `make lint` and `make test`. `make ci` runs the full
+CI pipeline locally (lint, build, test, then test again under ASan/UBSan) for gcc and clang,
+whichever are on `PATH` -- a convenient way to catch what CI would catch before pushing.
 
 ## Code style, in brief
 

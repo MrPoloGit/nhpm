@@ -42,7 +42,7 @@ CFLAGS  ?= -O2
 # wrong offsets and corrupts or crashes at runtime, far from the edit
 # that caused it.
 override CFLAGS += -std=c11 $(WARN) -Isrc $(PKG_CFLAGS) -MMD -MP
-LDLIBS  += $(PKG_LIBS)
+override LDLIBS += $(PKG_LIBS)
 
 SRC      := $(wildcard src/*.c src/ui/*.c)
 MAIN_SRC := src/main.c
@@ -114,4 +114,35 @@ install: nhpm
 clean:
 	rm -rf build nhpm
 
-.PHONY: debug test format lint install clean
+# Runs the same steps as .github/workflows/ci.yml (lint, build, test, then
+# test again under ASan/UBSan). With an explicit CC= (e.g. to work around
+# Apple clang's ASan deadlock, see CONTRIBUTING.md), runs with that compiler
+# only; otherwise once per compiler actually available here.
+ifeq ($(origin CC),command line)
+CI_CCS := $(CC)
+else ifeq ($(origin CC),environment)
+CI_CCS := $(CC)
+else
+CI_CCS := $(strip $(foreach c,gcc clang,$(if $(shell command -v $(c) 2>/dev/null),$(c))))
+endif
+
+ci:
+	@if [ -z "$(CI_CCS)" ]; then \
+		echo "error: no usable compiler (neither gcc nor clang found on PATH)"; exit 1; \
+	fi
+	@for cc in $(CI_CCS); do \
+		echo "== CC=$$cc: lint =="; \
+		$(MAKE) lint CC=$$cc CFLAGS="-Werror" || exit 1; \
+		echo "== CC=$$cc: build =="; \
+		$(MAKE) CC=$$cc CFLAGS="-Werror" || exit 1; \
+		echo "== CC=$$cc: test =="; \
+		$(MAKE) test CC=$$cc CFLAGS="-Werror" || exit 1; \
+		$(MAKE) clean >/dev/null; \
+		echo "== CC=$$cc: test under ASan/UBSan =="; \
+		$(MAKE) test CC=$$cc CFLAGS="-O0 -g -fsanitize=address,undefined -Werror" \
+			LDLIBS="-fsanitize=address,undefined" || exit 1; \
+		$(MAKE) clean >/dev/null; \
+	done
+	@echo "ci: all checks passed ($(CI_CCS))"
+
+.PHONY: debug test format lint install clean ci
