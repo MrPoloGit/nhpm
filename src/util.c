@@ -178,6 +178,37 @@ char *str_trim(char *s)
     return s;
 }
 
+char *str_replace_all(const char *s, const char *needle, const char *replacement)
+{
+    if (s == NULL) {
+        return NULL;
+    }
+    size_t needle_len = strlen(needle);
+    if (needle_len == 0) {
+        return str_dup(s);
+    }
+
+    buf out;
+    buf_init(&out);
+    size_t len = strlen(s);
+    for (size_t i = 0; i < len;) {
+        if (i + needle_len <= len && memcmp(s + i, needle, needle_len) == 0) {
+            if (!buf_append_str(&out, replacement)) {
+                buf_free(&out);
+                return NULL;
+            }
+            i += needle_len;
+        } else {
+            if (!buf_append(&out, s + i, 1)) {
+                buf_free(&out);
+                return NULL;
+            }
+            i++;
+        }
+    }
+    return buf_take(&out);
+}
+
 /* ---- growable byte buffer ---- */
 
 void buf_init(buf *b)

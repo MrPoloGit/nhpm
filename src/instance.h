@@ -44,6 +44,8 @@ typedef struct inst_instance {
 
     char *recipe;      /* build recipe name, e.g. "nethack-3.6-linux" (section 10.6) */
     char *make_vars;   /* extra `make` variables, e.g. "CFLAGS+=-O2"; "" if none */
+    char *custom_commands; /* only used when recipe is "custom": ';'-separated
+                            * commands run in src/ in order (section 10.6); "" if unset */
     char *install_dir; /* relative to the instance dir; default "install" */
     char *game_name;   /* default "nethack" */
 

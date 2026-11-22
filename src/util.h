@@ -88,6 +88,11 @@ bool str_contains_ci(const char *haystack, const char *needle);
 /* Trims leading and trailing ASCII whitespace from s in place; returns s. */
 char *str_trim(char *s);
 
+/* Returns a newly allocated copy of s with every non-overlapping occurrence
+ * of needle replaced by replacement, left to right. A copy of s unchanged
+ * if needle is "". NULL on OOM. */
+char *str_replace_all(const char *s, const char *needle, const char *replacement);
+
 /* ---- growable byte buffer ---- */
 
 typedef struct buf {

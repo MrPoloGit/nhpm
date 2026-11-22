@@ -1078,6 +1078,88 @@ nhp_err stack_check_consistency(const inst_instance *inst, stack_drift *out)
     return (out->detail != NULL) ? NHP_OK : NHP_ENOMEM;
 }
 
+void stack_check_result_free(stack_check_result *results)
+{
+    free(results);
+}
+
+nhp_err stack_check_disabled(const inst_instance *inst, stack_check_result **out_results,
+                             size_t *out_count)
+{
+    *out_results = NULL;
+    *out_count = 0;
+
+    size_t disabled_count = 0;
+    for (size_t i = 0; i < inst->patch_count; i++) {
+        if (!inst->patches[i].enabled) {
+            disabled_count++;
+        }
+    }
+    if (disabled_count == 0) {
+        return NHP_OK;
+    }
+
+    char *src_dir = inst_source_full_path(inst);
+    if (src_dir == NULL) {
+        return NHP_ENOMEM;
+    }
+
+    patch_slot *slots = NULL;
+    nhp_err err = build_slots(src_dir, inst->patches, inst->patch_count, &slots);
+    if (err != NHP_OK) {
+        free(src_dir);
+        return err;
+    }
+
+    stack_check_result *results = calloc(disabled_count, sizeof(*results));
+    if (results == NULL) {
+        free_slots(slots, inst->patch_count);
+        free(src_dir);
+        return NHP_ENOMEM;
+    }
+
+    size_t out_i = 0;
+    for (size_t i = 0; i < inst->patch_count && err == NHP_OK; i++) {
+        if (slots[i].patch.enabled) {
+            continue;
+        }
+
+        char *abs_patch_path = patches_file_path(src_dir, slots[i].filename);
+        if (abs_patch_path == NULL) {
+            err = NHP_ENOMEM;
+            break;
+        }
+
+        int strip = slots[i].patch.strip;
+        if (strip < 0) {
+            strip = determine_strip_level(src_dir, abs_patch_path);
+        }
+
+        quilt_dry_run d;
+        err = quilt_dry_run_patch(src_dir, abs_patch_path, strip, &d);
+        free(abs_patch_path);
+        if (err == NHP_OK) {
+            results[out_i].index = i;
+            results[out_i].strip = strip;
+            results[out_i].hunks_total = d.total_hunks;
+            results[out_i].hunks_failed = d.failed_hunks;
+            out_i++;
+            quilt_dry_run_free(&d);
+        }
+    }
+
+    free_slots(slots, inst->patch_count);
+    free(src_dir);
+
+    if (err != NHP_OK) {
+        free(results);
+        return err;
+    }
+    *out_results = results;
+    *out_count = out_i;
+    return NHP_OK;
+}
+
 nhp_err stack_restore(const inst_instance *inst, stack_conflict *out_conflict)
 {
     char *src_dir = inst_source_full_path(inst);

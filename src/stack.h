@@ -111,4 +111,24 @@ nhp_err stack_new_patch(inst_instance *inst, const char *id, const char *name, s
  * brand-new file's changes. Pure quilt bookkeeping; doesn't touch *inst. */
 nhp_err stack_track_file(const inst_instance *inst, const char *path);
 
+/* One disabled patch's dry-run result from stack_check_disabled() below.
+ * `index` is into inst->patches; `strip` is the level used (the patch's
+ * own, or detected on the spot if it never had one). */
+typedef struct stack_check_result {
+    size_t index;
+    int strip;
+    int hunks_total;
+    int hunks_failed;
+} stack_check_result;
+
+void stack_check_result_free(stack_check_result *results);
+
+/* docs 11.7's "c": dry-runs every disabled patch against the source tree
+ * as it stands (every enabled patch already applied, nothing else) and
+ * reports each one's hunk-failure count. Read-only -- nothing is pushed,
+ * popped, or written. *out_results (caller frees) has one entry per
+ * disabled patch, in patch-list order; *out_count is 0 if there are none. */
+nhp_err stack_check_disabled(const inst_instance *inst, stack_check_result **out_results,
+                             size_t *out_count);
+
 #endif /* NHPM_STACK_H */

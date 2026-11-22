@@ -433,6 +433,19 @@ directory the game looks for at runtime) is derived from `PREFIX` and baked into
 binary at build time, so a `make install PREFIX=X` after a plain `make all` produces a binary
 that still looks for the old (or default, `~/nh/install`) location.
 
+For `custom`, the commands actually run come from a separate `custom_commands` key in
+`instance.conf` (`;`-separated, run in `src/` in order), not from the recipe name. Each is
+split into an argument list the same whitespace-only way `make_vars` is (no quoting) and run
+through `proc_run_streaming()` like every other recipe step (6.8: never a real shell, so no
+`&&`/`|`/`$(...)`), stopping at the first that fails. Every literal `$PREFIX` in
+`custom_commands` is substituted with the instance's actual install path first (`str_replace_all()`,
+util.c) -- the same value the built-in recipes already pass as `PREFIX=<install_dir>` -- so a
+command needing it doesn't have to spell out an absolute path by hand:
+`make install PREFIX=$PREFIX`. An empty `custom_commands` is why `build_run()` returns
+`NHP_EINVAL` for `custom` today. The only way to set `custom_commands` at all is still
+hand-editing `instance.conf`; editing this list from the Build screen is still open
+(ui-progress.md).
+
 `nethack-3.6-linux` is verified end to end against the real NetHack-3.6.7_Released source
 (milestone M5): the built `nethack` binary installs to `<install_dir>/games/nethack` (a
 wrapper script that `cd`s into `<install_dir>/games/lib/nethackdir` before running the real
@@ -568,6 +581,38 @@ then Enable.
 **Force** takes a snapshot, runs `quilt push -f`, then opens `$EDITOR` on each source file
 and its `.rej` file (the interface is suspended, 13.7). Afterwards nhpm runs
 `quilt refresh` and marks the patch `modified = yes` in `instance.conf`.
+
+### 11.7 Checking disabled patches without applying them (`c`)
+
+The Patches screen's **c** fills in each disabled patch's Status column with a hunk-failure
+count, without touching the stack. Since disabled patches are never applied, the source tree
+as it stands already reflects every *enabled* patch; `stack_check_disabled()` just dry-runs
+each disabled slot against that tree at its known `strip` (detecting one first if it has
+none yet, 11.4), in patch-list order, and returns a `failed_hunks` count per slot. Nothing is
+pushed, popped, or written -- it's read-only. The CLI exposes it as `nhpm status --check`,
+listing each disabled patch with either "applies cleanly" or "N of M hunks would fail".
+
+### 11.8 Undo: an automatic snapshot per stack change
+
+Several operations already take a labeled instance snapshot before a risky step (Force
+above; starting an edit or a new patch, 12.4). Patches' **t**/**u** extend this to every
+operation in 11.5 (Enable, Disable, Move, Add, Remove): each takes a snapshot labeled
+`auto: <operation> <patch>` right before it runs. **t** takes one manually, with a label you
+type, same as Instances' Snapshots dialog (10.2). **u** finds the single most recent
+snapshot labeled `auto:` (not just the most recent snapshot overall, so an earlier manual
+one isn't silently consumed) and restores it the same way the Snapshots dialog's Enter
+does: `inst_snapshot_restore()` to put the old patch list back in `instance.conf`, then
+`stack_restore()` (10.4) to re-sync the actual Quilt folder to match it.
+
+### 11.9 Files touched by more than one patch
+
+The Patches screen's details area flags files more than one *enabled* patch touches, so a
+conflict a dry run wouldn't catch (both patches apply cleanly alone, but each expects to be
+the only one editing that file) is visible before it bites. `stack_find_shared_files()`
+collects `files_touched` (section 8's library metadata) for every enabled slot's library
+version, and returns the paths that show up for more than one. Best-effort like
+`files_touched` itself: a hand-edited or freshly captured patch with no library version yet
+contributes nothing.
 
 ---
 

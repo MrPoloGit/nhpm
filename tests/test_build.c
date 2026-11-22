@@ -66,6 +66,69 @@ static void test_custom_recipe_rejected(void)
     });
 }
 
+static void test_custom_recipe_runs(void)
+{
+    WITH_TEMP_INSTANCE({
+        free(inst.game_name);
+        inst.game_name = str_dup("game");
+        free(inst.recipe);
+        inst.recipe = str_dup("custom");
+
+        char *inst_dir_path = inst_dir("buildtest");
+        char *install_dir_full = path_join(inst_dir_path, inst.install_dir);
+        free(inst.custom_commands);
+        inst.custom_commands = str_dup("sh sys/unix/setup.sh;make all;make install PREFIX=$PREFIX");
+        CHECK(inst_save(&inst) == NHP_OK);
+
+        nhp_err err = build_run(&inst, NULL, NULL);
+        CHECK(err == NHP_OK);
+
+        char *game_path = path_join(install_dir_full, "games/game");
+        CHECK(fs_exists(game_path));
+        free(game_path);
+
+        char *log_path = path_join(inst_dir_path, "build.log");
+        char *log_data = NULL;
+        size_t log_len = 0;
+        CHECK(fs_read_file(log_path, &log_data, &log_len) == NHP_OK);
+        CHECK(strstr(log_data, "setup.sh") != NULL);
+        CHECK(strstr(log_data, "$PREFIX") == NULL); /* substituted, not left literal */
+        buf expect;
+        buf_init(&expect);
+        buf_append_fmt(&expect, "make install PREFIX=%s", install_dir_full);
+        char *expect_prefix_arg = buf_take(&expect);
+        CHECK(strstr(log_data, expect_prefix_arg) != NULL);
+        free(expect_prefix_arg);
+        free(log_data);
+        free(log_path);
+        free(install_dir_full);
+        free(inst_dir_path);
+    });
+}
+
+static void test_custom_recipe_stops_on_failure(void)
+{
+    WITH_TEMP_INSTANCE({
+        free(inst.recipe);
+        inst.recipe = str_dup("custom");
+        free(inst.custom_commands);
+        inst.custom_commands = str_dup("false;sh sys/unix/setup.sh");
+        CHECK(inst_save(&inst) == NHP_OK);
+
+        CHECK(build_run(&inst, NULL, NULL) == NHP_EIO);
+
+        char *inst_dir_path = inst_dir("buildtest");
+        char *log_path = path_join(inst_dir_path, "build.log");
+        char *log_data = NULL;
+        size_t log_len = 0;
+        CHECK(fs_read_file(log_path, &log_data, &log_len) == NHP_OK);
+        CHECK(strstr(log_data, "setup.sh") == NULL);
+        free(log_data);
+        free(log_path);
+        free(inst_dir_path);
+    });
+}
+
 static bool capture_line(void *user_data, bool is_stderr, const char *line)
 {
     (void)is_stderr;
@@ -159,6 +222,8 @@ int main(void)
 {
     test_is_stale();
     test_custom_recipe_rejected();
+    test_custom_recipe_runs();
+    test_custom_recipe_stops_on_failure();
     test_build_and_play();
     test_play_before_build_fails();
     test_make_vars_passed_to_build();

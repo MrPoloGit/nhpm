@@ -40,6 +40,30 @@ static void test_str_helpers(void)
     CHECK(!str_eq(NULL, "a"));
 }
 
+static void test_str_replace_all(void)
+{
+    char *r = str_replace_all("make install PREFIX=$PREFIX", "$PREFIX", "/opt/x");
+    CHECK(r != NULL && str_eq(r, "make install PREFIX=/opt/x"));
+    free(r);
+
+    /* several occurrences, non-overlapping, left to right */
+    r = str_replace_all("$PREFIX/a;$PREFIX/b", "$PREFIX", "/x");
+    CHECK(r != NULL && str_eq(r, "/x/a;/x/b"));
+    free(r);
+
+    /* no match: unchanged copy */
+    r = str_replace_all("nothing here", "$PREFIX", "/x");
+    CHECK(r != NULL && str_eq(r, "nothing here"));
+    free(r);
+
+    /* empty needle: unchanged copy, not an infinite loop */
+    r = str_replace_all("abc", "", "/x");
+    CHECK(r != NULL && str_eq(r, "abc"));
+    free(r);
+
+    CHECK(str_replace_all(NULL, "$PREFIX", "/x") == NULL);
+}
+
 static void test_buf(void)
 {
     buf b;
@@ -179,6 +203,7 @@ static void test_sha256(void)
 int main(void)
 {
     test_str_helpers();
+    test_str_replace_all();
     test_buf();
     test_path_join();
     test_path_is_safe();

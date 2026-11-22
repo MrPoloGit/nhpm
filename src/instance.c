@@ -198,6 +198,7 @@ void inst_free(inst_instance *inst)
     free(inst->notes);
     free(inst->recipe);
     free(inst->make_vars);
+    free(inst->custom_commands);
     free(inst->install_dir);
     free(inst->game_name);
     for (size_t i = 0; i < inst->patch_count; i++) {
@@ -222,8 +223,8 @@ static bool inst_core_fields_ok(const inst_instance *inst)
     return inst->name != NULL && inst->source != NULL && inst->source_path != NULL &&
            inst->created != NULL && inst->modified != NULL && inst->stack_modified != NULL &&
            inst->last_built != NULL && inst->last_played != NULL && inst->notes != NULL &&
-           inst->recipe != NULL && inst->make_vars != NULL && inst->install_dir != NULL &&
-           inst->game_name != NULL;
+           inst->recipe != NULL && inst->make_vars != NULL && inst->custom_commands != NULL &&
+           inst->install_dir != NULL && inst->game_name != NULL;
 }
 
 static nhp_err parse_instance_conf(const char *text, inst_instance *out)
@@ -255,6 +256,7 @@ static nhp_err parse_instance_conf(const char *text, inst_instance *out)
 
     out->recipe = str_dup(cfg_section_get(build_sec, "recipe", "custom"));
     out->make_vars = str_dup(cfg_section_get(build_sec, "make_vars", ""));
+    out->custom_commands = str_dup(cfg_section_get(build_sec, "custom_commands", ""));
     out->install_dir = str_dup(cfg_section_get(build_sec, "install_dir", "install"));
     out->game_name = str_dup(cfg_section_get(build_sec, "game_name", "nethack"));
 
@@ -339,6 +341,9 @@ static nhp_err write_build_section(cfg_doc *doc, const inst_instance *inst)
     nhp_err err = cfg_section_set(sec, "recipe", inst->recipe);
     if (err == NHP_OK) {
         err = cfg_section_set(sec, "make_vars", inst->make_vars);
+    }
+    if (err == NHP_OK) {
+        err = cfg_section_set(sec, "custom_commands", inst->custom_commands);
     }
     if (err == NHP_OK) {
         err = cfg_section_set(sec, "install_dir", inst->install_dir);
@@ -587,6 +592,7 @@ static nhp_err fill_new_instance_defaults(inst_instance *out, const char *recipe
     out->notes = str_dup("");
     out->recipe = str_dup((recipe != NULL && recipe[0] != '\0') ? recipe : "custom");
     out->make_vars = str_dup("");
+    out->custom_commands = str_dup("");
     out->install_dir = str_dup("install");
     out->game_name = str_dup("nethack");
     out->patches = NULL;

@@ -61,18 +61,19 @@ static nhp_err run_build_step(const char *src_dir, const char *const *argv, cons
     return failed ? NHP_EIO : NHP_OK;
 }
 
-/* Splits `vars` (docs/features.md 10.2's `make_vars`, e.g. "CFLAGS+=-O2")
- * on whitespace into str_dup'd argv entries -- no shell, no quoting.
- * *out_tokens is NULL and *out_count 0 if `vars` is "". */
-static nhp_err tokenize_make_vars(const char *vars, char ***out_tokens, size_t *out_count)
+/* Splits `s` on whitespace into str_dup'd argv entries -- no shell, no
+ * quoting (used for both `make_vars`, docs/features.md 10.2, and each
+ * command in `custom_commands`, 10.6). *out_tokens is NULL and *out_count
+ * 0 if `s` is "". */
+static nhp_err tokenize_whitespace(const char *s, char ***out_tokens, size_t *out_count)
 {
     *out_tokens = NULL;
     *out_count = 0;
-    if (vars == NULL || vars[0] == '\0') {
+    if (s == NULL || s[0] == '\0') {
         return NHP_OK;
     }
 
-    char *copy = str_dup(vars);
+    char *copy = str_dup(s);
     if (copy == NULL) {
         return NHP_ENOMEM;
     }
@@ -179,7 +180,7 @@ static nhp_err run_unix_recipe(const char *src_dir, const char *install_dir, con
 
     char **extra_tokens = NULL;
     size_t extra_count = 0;
-    err = tokenize_make_vars(make_vars, &extra_tokens, &extra_count);
+    err = tokenize_whitespace(make_vars, &extra_tokens, &extra_count);
     if (err != NHP_OK) {
         return err;
     }
@@ -201,8 +202,60 @@ static nhp_err run_unix_recipe(const char *src_dir, const char *install_dir, con
     return err;
 }
 
+/* docs/features.md 10.6's `custom` recipe: `commands` is instance.conf's
+ * `custom_commands`, ';'-separated, each then split on whitespace into argv
+ * the same way `make_vars` is -- no shell, no quoting. Every literal
+ * "$PREFIX" is replaced with `install_dir` first, same as the built-in
+ * recipes' own PREFIX=<install_dir>. Runs each command in order, stopping
+ * at the first failure. NHP_EINVAL if there are none. */
+static nhp_err run_custom_recipe(const char *src_dir, const char *install_dir,
+                                 const char *commands, proc_line_fn on_line, void *user_data,
+                                 buf *log)
+{
+    if (commands == NULL || commands[0] == '\0') {
+        err_set("recipe 'custom' has no custom_commands set in instance.conf");
+        return NHP_EINVAL;
+    }
+
+    char *copy = str_replace_all(commands, "$PREFIX", install_dir);
+    if (copy == NULL) {
+        return NHP_ENOMEM;
+    }
+
+    nhp_err err = NHP_OK;
+    int step = 0;
+    char *saveptr = NULL;
+    char *line = strtok_r(copy, ";", &saveptr);
+    while (line != NULL && err == NHP_OK) {
+        char **tokens = NULL;
+        size_t count = 0;
+        err = tokenize_whitespace(line, &tokens, &count);
+        if (err == NHP_OK && count > 0) {
+            char **argv = malloc((count + 1) * sizeof(*argv));
+            if (argv == NULL) {
+                err = NHP_ENOMEM;
+            } else {
+                memcpy(argv, tokens, count * sizeof(*argv));
+                argv[count] = NULL;
+                step++;
+                char label[32];
+                (void)snprintf(label, sizeof(label), "custom step %d", step);
+                err = run_build_step(src_dir, (const char *const *)argv, label, on_line,
+                                     user_data, log);
+                free(argv);
+            }
+        }
+        free_tokens(tokens, count);
+        line = strtok_r(NULL, ";", &saveptr);
+    }
+
+    free(copy);
+    return err;
+}
+
 static nhp_err run_recipe(const char *recipe, const char *src_dir, const char *install_dir,
-                          const char *make_vars, proc_line_fn on_line, void *user_data, buf *log)
+                          const char *make_vars, const char *custom_commands, proc_line_fn on_line,
+                          void *user_data, buf *log)
 {
     if (str_eq(recipe, "nethack-3.4-unix")) {
         return run_unix_recipe(src_dir, install_dir, NULL, false, make_vars, on_line, user_data,
@@ -215,6 +268,9 @@ static nhp_err run_recipe(const char *recipe, const char *src_dir, const char *i
     if (str_eq(recipe, "nethack-3.7-linux")) {
         return run_unix_recipe(src_dir, install_dir, "sys/unix/hints/linux.370", true, make_vars,
                                on_line, user_data, log);
+    }
+    if (str_eq(recipe, "custom")) {
+        return run_custom_recipe(src_dir, install_dir, custom_commands, on_line, user_data, log);
     }
     err_set("recipe '%s' has no built-in build steps yet", recipe);
     return NHP_EINVAL;
@@ -238,7 +294,8 @@ nhp_err build_run(inst_instance *inst, proc_line_fn on_line, void *user_data)
     buf log;
     buf_init(&log);
     nhp_err err =
-        run_recipe(inst->recipe, src_dir, install_dir, inst->make_vars, on_line, user_data, &log);
+        run_recipe(inst->recipe, src_dir, install_dir, inst->make_vars, inst->custom_commands,
+                  on_line, user_data, &log);
 
     char *log_text = buf_take(&log);
     char *log_path = path_join(inst_dir_path, "build.log");

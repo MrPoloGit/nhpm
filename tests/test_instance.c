@@ -83,10 +83,15 @@ static void test_new_and_load_round_trip(void)
         CHECK(str_eq(inst.source, "3.6.7"));
         CHECK(str_eq(inst.source_path, "src"));
         CHECK(str_eq(inst.recipe, "nethack-3.6-linux"));
+        CHECK(str_eq(inst.custom_commands, ""));
         CHECK(str_eq(inst.install_dir, "install"));
         CHECK(str_eq(inst.game_name, "nethack"));
         CHECK(inst.patch_count == 0);
         CHECK(strlen(inst.created) > 0);
+
+        free(inst.custom_commands);
+        inst.custom_commands = str_dup("make all;make install PREFIX=/tmp/x");
+        CHECK(inst_save(&inst) == NHP_OK);
         inst_free(&inst);
 
         /* the working copy must be writable, unlike the base source */
@@ -103,6 +108,7 @@ static void test_new_and_load_round_trip(void)
         CHECK(inst_load("myinst", &inst) == NHP_OK);
         CHECK(str_eq(inst.name, "myinst"));
         CHECK(str_eq(inst.recipe, "nethack-3.6-linux"));
+        CHECK(str_eq(inst.custom_commands, "make all;make install PREFIX=/tmp/x"));
         inst_free(&inst);
     });
 }

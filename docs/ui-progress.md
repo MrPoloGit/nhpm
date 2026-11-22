@@ -148,7 +148,9 @@ planned to working, move it here instead of leaving the gap implicit.
 - [x] `d` Diff view: the selected patch's applied diff, read from the instance's own
       `patches/` folder (not the library's copy -- they can differ for a hand-fixed patch),
       shown in `ui_show_text_dialog()`
-- [ ] `c` dry-run every disabled patch, fill in a real Status column ("2 hunks would fail")
+- [x] Backend for `c` (dry-run every disabled patch): `stack_check_disabled()`
+      (docs/features.md 11.7), read-only. Exposed via CLI as `nhpm status --check`; the
+      Patches screen's own `c` key and Status column aren't wired up to it yet
 - [x] `w` opens the Changes dialog (`scr_changes.c`, not a screen in its own right -- see
       below)
 - [x] `N` new empty patch; `E` edit an existing one; `o` open a source file in `$EDITOR`; `R`
@@ -181,9 +183,13 @@ planned to working, move it here instead of leaving the gap implicit.
       Foundation above)
 - [x] `p` play already works globally once a build has succeeded (no Build-specific wiring
       needed -- `suspend_and_run_play()` in ui.c is screen-independent)
-- [ ] `custom` recipes: `build_run()` returns `NHP_EINVAL` for them (no built-in command list,
-      docs/features.md 10.6); the screen reports this rather than running anything --
-      editable recipes are still UI/M7 scope, not built
+- [x] `custom` recipes now run: `instance.conf`'s `custom_commands` (`;`-separated, no
+      quoting, `$PREFIX` substituted for the install path, docs/features.md 10.6) is split
+      and run through `proc_run_streaming()`, stopping at the first failure; `build_run()`
+      still returns `NHP_EINVAL` only when it's empty. Tested via CLI (`nhpm build`), not yet
+      exercised from the Build screen
+- [ ] Editing `custom_commands` from the Build screen -- the only way to set it today is
+      hand-editing `instance.conf`
 
 **F7 Sources** -- done
 - [x] `n` Known versions popup (`ui_show_popup_menu()`): a small, hand-verified catalog

@@ -233,6 +233,79 @@ static void test_dependent_patch_blocks_disable(void)
     });
 }
 
+static void test_check_disabled(void)
+{
+    WITH_TEMP_INSTANCE({
+        char *p01 = abs_patch("01-lamp-radius.diff");
+        char *p02 = abs_patch("02-apply-pickaxe.diff");
+        char *p03 = abs_patch("03-conflicting-lamp.diff");
+        size_t idx01 = SIZE_MAX;
+        size_t idx02 = SIZE_MAX;
+        size_t idx03 = SIZE_MAX;
+        stack_conflict conflict;
+        /* t01 enabled (changes src/light.c); t02 disabled (unrelated
+         * file, would apply cleanly); t03 disabled (also touches
+         * src/light.c's same line, so it conflicts with t01 already
+         * applied -- same pair test_enable_conflict_rolls_back uses). */
+        CHECK(stack_add(&inst, "t01", "1.0", "Lamp Radius", p01, "abc", true, &idx01, &conflict) ==
+              NHP_OK);
+        CHECK(stack_add(&inst, "t02", "1.0", "Apply Pickaxe", p02, "abc", false, &idx02,
+                        &conflict) == NHP_OK);
+        CHECK(stack_add(&inst, "t03", "1.0", "Conflicting Lamp", p03, "abc", false, &idx03,
+                        &conflict) == NHP_OK);
+        free(p01);
+        free(p02);
+        free(p03);
+        CHECK(inst.patches[idx02].strip == -1); /* never enabled, never determined */
+        CHECK(inst.patches[idx03].strip == -1);
+
+        char *src_dir = inst_source_full_path(&inst);
+        unsigned long before = tree_fingerprint(src_dir);
+
+        stack_check_result *results = NULL;
+        size_t result_count = 0;
+        CHECK(stack_check_disabled(&inst, &results, &result_count) == NHP_OK);
+        CHECK(result_count == 2);
+
+        bool found02 = false;
+        bool found03 = false;
+        for (size_t i = 0; i < result_count; i++) {
+            if (results[i].index == idx02) {
+                found02 = true;
+                CHECK(results[i].hunks_failed == 0);
+                CHECK(results[i].hunks_total > 0);
+                CHECK(results[i].strip >= 0); /* detected on the spot */
+            } else if (results[i].index == idx03) {
+                found03 = true;
+                CHECK(results[i].hunks_failed == 1);
+            }
+        }
+        CHECK(found02);
+        CHECK(found03);
+        stack_check_result_free(results);
+
+        /* purely read-only: nothing pushed/popped/written */
+        CHECK(!inst.patches[idx02].enabled);
+        CHECK(!inst.patches[idx03].enabled);
+        CHECK(inst.patches[idx02].strip == -1);
+        CHECK(inst.patches[idx03].strip == -1);
+        CHECK(tree_fingerprint(src_dir) == before);
+        free(src_dir);
+    });
+}
+
+static void test_check_disabled_none(void)
+{
+    WITH_TEMP_INSTANCE({
+        stack_check_result *results = NULL;
+        size_t result_count = SIZE_MAX;
+        CHECK(stack_check_disabled(&inst, &results, &result_count) == NHP_OK);
+        CHECK(result_count == 0);
+        CHECK(results == NULL);
+        stack_check_result_free(results);
+    });
+}
+
 static void test_enable_conflict_rolls_back(void)
 {
     WITH_TEMP_INSTANCE({
@@ -775,6 +848,8 @@ int main(void)
     test_add_strip_detection();
     test_add_disabled_then_enable();
     test_dependent_patch_blocks_disable();
+    test_check_disabled();
+    test_check_disabled_none();
     test_enable_conflict_rolls_back();
     test_move();
     test_remove();

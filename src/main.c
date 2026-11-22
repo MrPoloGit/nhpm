@@ -68,7 +68,7 @@ static void print_usage(FILE *out)
     (void)fprintf(out, "       nhpm new-patch <name> [--inst <name>]\n");
     (void)fprintf(out, "       nhpm track <path> [--inst <name>]\n");
     (void)fprintf(out, "       nhpm check [--adopt|--restore] [--inst <name>]\n");
-    (void)fprintf(out, "       nhpm status [--inst <name>]\n");
+    (void)fprintf(out, "       nhpm status [--check] [--inst <name>]\n");
     (void)fprintf(out, "       nhpm build [--inst <name>]\n");
     (void)fprintf(out, "       nhpm play [--inst <name>]\n");
     (void)fprintf(out, "\n");
@@ -1454,6 +1454,13 @@ static int cmd_check(int argc, char **argv)
 
 static int cmd_status(int argc, char **argv)
 {
+    bool check = false;
+    for (int i = 0; i < argc; i++) {
+        if (str_eq(argv[i], "--check")) {
+            check = true;
+        }
+    }
+
     inst_instance inst;
     nhp_err err = resolve_instance(argc, argv, 2, &inst);
     if (err != NHP_OK) {
@@ -1473,6 +1480,32 @@ static int cmd_status(int argc, char **argv)
     (void)printf("Patches:    %zu enabled, %zu total\n", enabled_count, inst.patch_count);
     (void)printf("Last built: %s%s\n", (inst.last_built[0] != '\0') ? inst.last_built : "never",
                  build_is_stale(&inst) ? " (out of date)" : "");
+
+    if (check) {
+        stack_check_result *results = NULL;
+        size_t result_count = 0;
+        nhp_err check_err = stack_check_disabled(&inst, &results, &result_count);
+        if (check_err != NHP_OK) {
+            (void)fprintf(stderr, "nhpm: could not check disabled patches: %s\n", err_get());
+        } else if (result_count == 0) {
+            (void)printf("\nNo disabled patches to check.\n");
+        } else {
+            (void)printf("\nDisabled patches (docs/features.md 11.7):\n");
+            for (size_t i = 0; i < result_count; i++) {
+                const inst_patch *p = &inst.patches[results[i].index];
+                if (results[i].hunks_failed == 0) {
+                    (void)printf("  %-20s %-8s applies cleanly (-p%d)\n", p->id, p->version,
+                                 results[i].strip);
+                } else {
+                    (void)printf("  %-20s %-8s %d of %d hunks would fail (-p%d)\n", p->id,
+                                 p->version, results[i].hunks_failed, results[i].hunks_total,
+                                 results[i].strip);
+                }
+            }
+        }
+        stack_check_result_free(results);
+    }
+
     inst_free(&inst);
     return 0;
 }
