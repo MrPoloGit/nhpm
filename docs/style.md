@@ -369,31 +369,7 @@ this plain.
 
 ---
 
-## 8. Python scripts
-
-Dev tooling under `scripts/` (currently `find_long_comments.py`) is Python, not shell, when
-the logic is easier to express that way (parsing, not just chaining commands).
-
-- Python 3, **standard library only** -- no third-party dependencies and no
-  `requirements.txt`, so a script runs on any machine with `python3` and nothing else
-  installed.
-- PEP 8: 4-space indentation, `snake_case` functions, a module-level docstring with a
-  `Usage:` line.
-- A one-line docstring on any function whose purpose isn't obvious from its name; no
-  docstring at all is also fine for a short, obviously-named helper.
-- `if __name__ == "__main__": sys.exit(main())`, so the script is directly runnable and
-  returns a real exit status for shell/CI callers.
-- No stray `print()` debugging left in; the only output is the tool's actual job (e.g. the
-  comments `find_long_comments.py` found), so it composes cleanly in a pipeline or `make`
-  target.
-- No formatter or linter is wired up for these yet (`make lint` only covers `src/`/`tests/`
-  C code); match the existing script's style by eye until one is added.
-- Same 3-line cap as 6.10 on an inline `#` comment (a docstring is not a comment and isn't
-  bound by this -- it can run as long as it needs to).
-
----
-
-## 9. Makefiles
+## 8. Makefiles
 
 Covers the top-level `Makefile`; `tests/fixtures/source/Makefile` is fixture data and this
 section doesn't apply to it (see the note above).
@@ -420,7 +396,7 @@ section doesn't apply to it (see the note above).
 
 ---
 
-## 10. GitHub Actions workflows (YAML)
+## 9. GitHub Actions workflows (YAML)
 
 Covers `.github/workflows/*.yml` (`ci.yml`, `release.yml`).
 
@@ -444,7 +420,7 @@ Covers `.github/workflows/*.yml` (`ci.yml`, `release.yml`).
 
 ---
 
-## 11. Markdown documentation
+## 10. Markdown documentation
 
 Covers `README.md`, `CONTRIBUTING.md`, and everything under `docs/`.
 
