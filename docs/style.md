@@ -297,7 +297,8 @@ through globals.
 | `.clang-tidy` | `bugprone-*`, `cert-*`, `clang-analyzer-*`, `misc-*`, `readability-identifier-naming` (enforces 6.3), `readability-function-size`; noisy checks turned off explicitly |
 | `.editorconfig` | spaces, LF, final newline, tabs only in Makefiles, 2-space indent for YAML, for editors |
 | `make format` | runs `clang-format -i` on all sources |
-| `make lint` | `clang-format --dry-run --Werror`, `clang-tidy`, `cppcheck`, banned-function grep |
+| `make lint` | `comment-length-check`, `clang-format --dry-run --Werror`, `clang-tidy`, `cppcheck`, banned-function grep |
+| `make comment-length-check` | an `awk` check for the 3-line comment cap (6.10 and this doc's 7/9/10), best-effort: a `/*`/`#` inside a string literal can misfire, since it isn't a real parser |
 | CI | runs `make lint`, builds with `-Werror` on GCC and Clang, runs all tests under sanitizers |
 
 Starting `.clang-format`:

@@ -3,6 +3,7 @@
 #include "feature.h"
 #include "stack.h"
 
+#include "library.h"
 #include "quilt.h"
 
 #include <ctype.h>
@@ -459,6 +460,22 @@ static nhp_err finish_slots(inst_instance *inst, patch_slot *slots, size_t count
     return inst_save(inst);
 }
 
+/* Takes an "auto-<op>-<id>" snapshot before a stack mutation, so
+ * stack_undo() can find and restore it (dashes, not "auto: op id": see
+ * docs/features.md 11.8). Fails the operation if this fails, like above. */
+static nhp_err take_auto_snapshot(const inst_instance *inst, const char *op, const char *patch_id)
+{
+    buf label_buf;
+    buf_init(&label_buf);
+    buf_append_fmt(&label_buf, "auto-%s-%s", op, patch_id);
+    char *label = buf_take(&label_buf);
+    char *snapshot_name = NULL;
+    nhp_err err = inst_snapshot_create(inst->name, label, &snapshot_name);
+    free(snapshot_name);
+    free(label);
+    return err;
+}
+
 nhp_err stack_enable(inst_instance *inst, size_t index, stack_conflict *out_conflict)
 {
     if (index >= inst->patch_count) {
@@ -466,6 +483,11 @@ nhp_err stack_enable(inst_instance *inst, size_t index, stack_conflict *out_conf
     }
     if (inst->patches[index].enabled) {
         return NHP_OK;
+    }
+
+    nhp_err snap_err = take_auto_snapshot(inst, "enable", inst->patches[index].id);
+    if (snap_err != NHP_OK) {
+        return snap_err;
     }
 
     char *src_dir = inst_source_full_path(inst);
@@ -509,6 +531,11 @@ nhp_err stack_disable(inst_instance *inst, size_t index, stack_conflict *out_con
         return NHP_OK;
     }
 
+    nhp_err snap_err = take_auto_snapshot(inst, "disable", inst->patches[index].id);
+    if (snap_err != NHP_OK) {
+        return snap_err;
+    }
+
     char *src_dir = inst_source_full_path(inst);
     if (src_dir == NULL) {
         return NHP_ENOMEM;
@@ -545,6 +572,11 @@ nhp_err stack_move(inst_instance *inst, size_t from, size_t to, stack_conflict *
     }
     if (from == to) {
         return NHP_OK;
+    }
+
+    nhp_err snap_err = take_auto_snapshot(inst, "move", inst->patches[from].id);
+    if (snap_err != NHP_OK) {
+        return snap_err;
     }
 
     char *src_dir = inst_source_full_path(inst);
@@ -686,6 +718,11 @@ nhp_err stack_add(inst_instance *inst, const char *id, const char *version, cons
                   const char *library_patch_path, const char *sha256, bool enable,
                   size_t *out_new_index, stack_conflict *out_conflict)
 {
+    nhp_err snap_err = take_auto_snapshot(inst, "add", id);
+    if (snap_err != NHP_OK) {
+        return snap_err;
+    }
+
     char *src_dir = inst_source_full_path(inst);
     if (src_dir == NULL) {
         return NHP_ENOMEM;
@@ -760,6 +797,11 @@ nhp_err stack_remove(inst_instance *inst, size_t index, stack_conflict *out_conf
 {
     if (index >= inst->patch_count) {
         return NHP_EINVAL;
+    }
+
+    nhp_err snap_err = take_auto_snapshot(inst, "remove", inst->patches[index].id);
+    if (snap_err != NHP_OK) {
+        return snap_err;
     }
 
     if (inst->patches[index].enabled) {
@@ -1157,6 +1199,262 @@ nhp_err stack_check_disabled(const inst_instance *inst, stack_check_result **out
     }
     *out_results = results;
     *out_count = out_i;
+    return NHP_OK;
+}
+
+void stack_shared_file_free(stack_shared_file *f)
+{
+    free(f->path);
+    str_tokens_free(f->patch_ids, f->patch_count);
+    memset(f, 0, sizeof(*f));
+}
+
+void stack_shared_files_free(stack_shared_file *files, size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        stack_shared_file_free(&files[i]);
+    }
+    free(files);
+}
+
+/* One enabled patch's files_touched (docs 8), tokenized. */
+typedef struct patch_files {
+    const char *patch_id; /* borrowed from inst->patches */
+    char **tokens;        /* owned */
+    size_t count;
+} patch_files;
+
+static void free_patch_files(patch_files *pf, size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        str_tokens_free(pf[i].tokens, pf[i].count);
+    }
+    free(pf);
+}
+
+/* Library files_touched for every enabled patch with a matching library
+ * version (docs 8/11.9), best-effort. *out_total is the combined token
+ * count, for the caller to size its flat touches array. */
+static nhp_err collect_patch_files(const inst_instance *inst, patch_files **out_patch_files,
+                                   size_t *out_count, size_t *out_total)
+{
+    *out_patch_files = NULL;
+    *out_count = 0;
+    *out_total = 0;
+    if (inst->patch_count == 0) {
+        return NHP_OK;
+    }
+
+    patch_files *per_patch = calloc(inst->patch_count, sizeof(*per_patch));
+    if (per_patch == NULL) {
+        return NHP_ENOMEM;
+    }
+
+    size_t per_patch_count = 0;
+    size_t total = 0;
+    for (size_t i = 0; i < inst->patch_count; i++) {
+        if (!inst->patches[i].enabled) {
+            continue;
+        }
+        lib_patch lp;
+        if (lib_find(inst->patches[i].id, &lp) != NHP_OK) {
+            continue;
+        }
+        const char *files_touched = "";
+        for (size_t v = 0; v < lp.version_count; v++) {
+            if (str_eq(lp.versions[v].version, inst->patches[i].version)) {
+                files_touched = lp.versions[v].files_touched;
+                break;
+            }
+        }
+        char **tokens = NULL;
+        size_t count = 0;
+        nhp_err err = str_split_whitespace(files_touched, &tokens, &count);
+        lib_patch_free(&lp);
+        if (err != NHP_OK) {
+            free_patch_files(per_patch, per_patch_count);
+            return err;
+        }
+        if (count == 0) {
+            str_tokens_free(tokens, count);
+            continue;
+        }
+        per_patch[per_patch_count].patch_id = inst->patches[i].id;
+        per_patch[per_patch_count].tokens = tokens;
+        per_patch[per_patch_count].count = count;
+        per_patch_count++;
+        total += count;
+    }
+
+    *out_patch_files = per_patch;
+    *out_count = per_patch_count;
+    *out_total = total;
+    return NHP_OK;
+}
+
+typedef struct file_touch {
+    const char *path;
+    const char *patch_id;
+} file_touch;
+
+/* Groups `touches` by path and appends an entry to `results` (caller-owned,
+ * sized touch_count -- the worst case), bumping *result_count, for every
+ * path more than one distinct patch_id touches. */
+static nhp_err group_shared_files(const file_touch *touches, size_t touch_count,
+                                  stack_shared_file *results, size_t *result_count)
+{
+    bool *consumed = calloc(touch_count, sizeof(*consumed));
+    const char **ids = calloc(touch_count, sizeof(*ids));
+    if (consumed == NULL || ids == NULL) {
+        free(consumed);
+        free(ids);
+        return NHP_ENOMEM;
+    }
+
+    nhp_err err = NHP_OK;
+    for (size_t i = 0; i < touch_count && err == NHP_OK; i++) {
+        if (consumed[i]) {
+            continue;
+        }
+        consumed[i] = true;
+        size_t id_count = 0;
+        ids[id_count++] = touches[i].patch_id;
+        for (size_t j = i + 1; j < touch_count; j++) {
+            if (consumed[j] || !str_eq(touches[j].path, touches[i].path)) {
+                continue;
+            }
+            consumed[j] = true;
+            bool already = false;
+            for (size_t k = 0; k < id_count; k++) {
+                if (str_eq(ids[k], touches[j].patch_id)) {
+                    already = true;
+                    break;
+                }
+            }
+            if (!already) {
+                ids[id_count++] = touches[j].patch_id;
+            }
+        }
+        if (id_count < 2) {
+            continue;
+        }
+
+        char **owned_ids = calloc(id_count, sizeof(*owned_ids));
+        char *path_dup = str_dup(touches[i].path);
+        bool ok = owned_ids != NULL && path_dup != NULL;
+        for (size_t k = 0; ok && k < id_count; k++) {
+            owned_ids[k] = str_dup(ids[k]);
+            ok = ok && owned_ids[k] != NULL;
+        }
+        if (!ok) {
+            str_tokens_free(owned_ids, id_count);
+            free(path_dup);
+            err = NHP_ENOMEM;
+            break;
+        }
+        results[*result_count].path = path_dup;
+        results[*result_count].patch_ids = owned_ids;
+        results[*result_count].patch_count = id_count;
+        (*result_count)++;
+    }
+
+    free(ids);
+    free(consumed);
+    return err;
+}
+
+nhp_err stack_find_shared_files(const inst_instance *inst, stack_shared_file **out_files,
+                                size_t *out_count)
+{
+    *out_files = NULL;
+    *out_count = 0;
+
+    patch_files *per_patch = NULL;
+    size_t per_patch_count = 0;
+    size_t total_touches = 0;
+    nhp_err err = collect_patch_files(inst, &per_patch, &per_patch_count, &total_touches);
+    if (err != NHP_OK || total_touches == 0) {
+        free_patch_files(per_patch, per_patch_count);
+        return err;
+    }
+
+    file_touch *touches = calloc(total_touches, sizeof(*touches));
+    if (touches == NULL) {
+        free_patch_files(per_patch, per_patch_count);
+        return NHP_ENOMEM;
+    }
+    size_t touch_count = 0;
+    for (size_t i = 0; i < per_patch_count; i++) {
+        for (size_t j = 0; j < per_patch[i].count; j++) {
+            touches[touch_count].path = per_patch[i].tokens[j];
+            touches[touch_count].patch_id = per_patch[i].patch_id;
+            touch_count++;
+        }
+    }
+
+    stack_shared_file *results = calloc(touch_count, sizeof(*results));
+    if (results == NULL) {
+        free(touches);
+        free_patch_files(per_patch, per_patch_count);
+        return NHP_ENOMEM;
+    }
+
+    size_t result_count = 0;
+    err = group_shared_files(touches, touch_count, results, &result_count);
+    free(touches);
+    free_patch_files(per_patch, per_patch_count);
+
+    if (err != NHP_OK || result_count == 0) {
+        stack_shared_files_free(results, result_count);
+        return err;
+    }
+    *out_files = results;
+    *out_count = result_count;
+    return NHP_OK;
+}
+
+nhp_err stack_undo(inst_instance *inst, stack_conflict *out_conflict)
+{
+    inst_snapshot *snaps = NULL;
+    size_t snap_count = 0;
+    nhp_err err = inst_snapshot_list(inst->name, &snaps, &snap_count);
+    if (err != NHP_OK) {
+        return err;
+    }
+
+    char *target = NULL;
+    for (size_t i = snap_count; i > 0; i--) {
+        if (strncmp(snaps[i - 1].label, "auto-", 5) == 0) {
+            target = str_dup(snaps[i - 1].filename);
+            break;
+        }
+    }
+    inst_snapshot_list_free(snaps, snap_count);
+    if (target == NULL) {
+        err_set("nothing to undo -- no automatic snapshot found for '%s'", inst->name);
+        return NHP_ENOENT;
+    }
+
+    err = inst_snapshot_restore(inst->name, target);
+    free(target);
+    if (err != NHP_OK) {
+        return err;
+    }
+
+    inst_instance reloaded;
+    err = inst_load(inst->name, &reloaded);
+    if (err != NHP_OK) {
+        return err;
+    }
+
+    err = stack_restore(&reloaded, out_conflict);
+    if (err != NHP_OK) {
+        inst_free(&reloaded);
+        return err;
+    }
+
+    inst_free(inst);
+    *inst = reloaded;
     return NHP_OK;
 }
 

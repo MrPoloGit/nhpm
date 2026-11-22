@@ -62,6 +62,7 @@ static void print_usage(FILE *out)
     (void)fprintf(out, "       nhpm enable <id>[@version] [--inst <name>]\n");
     (void)fprintf(out, "       nhpm disable <id> [--inst <name>]\n");
     (void)fprintf(out, "       nhpm move <id> up|down|<position> [--inst <name>]\n");
+    (void)fprintf(out, "       nhpm undo [--inst <name>]\n");
     (void)fprintf(out, "       nhpm edit-begin <id> [--inst <name>]\n");
     (void)fprintf(out, "       nhpm edit-refresh <id> [--version V] [--name NAME]\n"
                        "               [--author A] [--target T] [--inst <name>]\n");
@@ -1092,6 +1093,39 @@ static int cmd_move(int argc, char **argv)
     return 0;
 }
 
+/* docs/features.md 11.8's "u": undoes the most recent enable/disable/
+ * move/add/remove by restoring its automatic snapshot. */
+static int cmd_undo(int argc, char **argv)
+{
+    inst_instance inst;
+    inst_lock lock;
+    nhp_err err = resolve_instance_locked(argc, argv, 2, &inst, &lock);
+    if (err != NHP_OK) {
+        (void)fprintf(stderr, "nhpm: %s\n", err_get());
+        return (err == NHP_ELOCKED) ? 5 : 1;
+    }
+
+    stack_conflict conflict = {0};
+    err = stack_undo(&inst, &conflict);
+    if (err == NHP_ECONFLICT) {
+        print_patch_conflict(&conflict);
+        stack_conflict_free(&conflict);
+        inst_lock_release(&lock);
+        inst_free(&inst);
+        return 3;
+    }
+    if (err != NHP_OK) {
+        (void)fprintf(stderr, "nhpm: could not undo: %s\n", err_get());
+        inst_lock_release(&lock);
+        inst_free(&inst);
+        return 1;
+    }
+    (void)printf("Undid the last change to %s.\n", inst.name);
+    inst_lock_release(&lock);
+    inst_free(&inst);
+    return 0;
+}
+
 /* docs/features.md 12.4's "E" (Edit patch), "begin" half: pops the stack
  * down to and including <id>, leaving it on top to edit directly. Follow
  * up with 'edit-refresh' once done. */
@@ -1504,6 +1538,24 @@ static int cmd_status(int argc, char **argv)
             }
         }
         stack_check_result_free(results);
+
+        stack_shared_file *shared = NULL;
+        size_t shared_count = 0;
+        nhp_err shared_err = stack_find_shared_files(&inst, &shared, &shared_count);
+        if (shared_err != NHP_OK) {
+            (void)fprintf(stderr, "nhpm: could not check for shared files: %s\n", err_get());
+        } else if (shared_count > 0) {
+            (void)printf("\nFiles touched by more than one enabled patch (docs/features.md "
+                         "11.9):\n");
+            for (size_t i = 0; i < shared_count; i++) {
+                (void)printf("  %-30s", shared[i].path);
+                for (size_t j = 0; j < shared[i].patch_count; j++) {
+                    (void)printf("%s%s", (j > 0) ? ", " : " ", shared[i].patch_ids[j]);
+                }
+                (void)printf("\n");
+            }
+        }
+        stack_shared_files_free(shared, shared_count);
     }
 
     inst_free(&inst);
@@ -2137,6 +2189,9 @@ static int run_cli(int argc, char **argv)
     }
     if (str_eq(cmd, "move")) {
         return cmd_move(argc, argv);
+    }
+    if (str_eq(cmd, "undo")) {
+        return cmd_undo(argc, argv);
     }
     if (str_eq(cmd, "edit-begin")) {
         return cmd_edit_begin(argc, argv);

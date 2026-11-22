@@ -597,12 +597,15 @@ listing each disabled patch with either "applies cleanly" or "N of M hunks would
 Several operations already take a labeled instance snapshot before a risky step (Force
 above; starting an edit or a new patch, 12.4). Patches' **t**/**u** extend this to every
 operation in 11.5 (Enable, Disable, Move, Add, Remove): each takes a snapshot labeled
-`auto: <operation> <patch>` right before it runs. **t** takes one manually, with a label you
-type, same as Instances' Snapshots dialog (10.2). **u** finds the single most recent
-snapshot labeled `auto:` (not just the most recent snapshot overall, so an earlier manual
-one isn't silently consumed) and restores it the same way the Snapshots dialog's Enter
-does: `inst_snapshot_restore()` to put the old patch list back in `instance.conf`, then
-`stack_restore()` (10.4) to re-sync the actual Quilt folder to match it.
+`auto-<operation>-<patch>` right before it runs -- dashes, not `auto: <operation> <patch>`,
+because a snapshot's label is never stored verbatim; `inst_snapshot_create()` only keeps it
+as part of the filename, sanitized to alnum-and-single-dashes, and that's what's read back.
+**t** takes one manually, with a label you type, same as Instances' Snapshots dialog (10.2).
+**u** finds the single most recent snapshot whose label starts with `auto-` (not just the
+most recent snapshot overall, so an earlier manual one isn't silently consumed) and
+restores it the same way the Snapshots dialog's Enter does: `inst_snapshot_restore()` to put
+the old patch list back in `instance.conf`, then `stack_restore()` (10.4) to re-sync the
+actual Quilt folder to match it. The CLI exposes it as `nhpm undo`.
 
 ### 11.9 Files touched by more than one patch
 
@@ -612,7 +615,8 @@ the only one editing that file) is visible before it bites. `stack_find_shared_f
 collects `files_touched` (section 8's library metadata) for every enabled slot's library
 version, and returns the paths that show up for more than one. Best-effort like
 `files_touched` itself: a hand-edited or freshly captured patch with no library version yet
-contributes nothing.
+contributes nothing. The CLI exposes it as part of `nhpm status --check` (11.7), listing
+each shared file with the patches that touch it.
 
 ---
 

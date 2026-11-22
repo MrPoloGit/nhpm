@@ -163,9 +163,17 @@ planned to working, move it here instead of leaving the gap implicit.
       header-writing step the way `mkp_capture()`'s patches get -- a patch made via
       N/edit/refresh is a plain diff with correct library metadata, no embedded name/author
       text in the file itself
-- [ ] `t` snapshot, `u` undo last change
+- [x] Backend for `u` (undo last change): every `stack_enable`/`disable`/`move`/`add`/
+      `remove` now takes an `auto-<op>-<id>` snapshot first; `stack_undo()` (docs/features.md
+      11.8) finds the latest one and restores it, re-syncing the Quilt folder too. Exposed
+      via CLI as `nhpm undo`. `t` (manual labeled snapshot) is unchanged -- Instances' own
+      Snapshots dialog already covers it; the Patches screen's own `t`/`u` keys aren't wired
+      up yet
 - [ ] "uncaptured changes" header indicator
-- [ ] Multi-patch file-conflict flag in the details area
+- [x] Backend for the multi-patch file-conflict flag: `stack_find_shared_files()`
+      (docs/features.md 11.9), read-only, best-effort via library `files_touched`. Exposed
+      via CLI as part of `nhpm status --check`; the Patches screen's own details-area flag
+      isn't wired up to it yet
 
 **F6 Build** -- mostly done
 - [x] `b` runs the active instance's recipe (`build_run()`), streaming each line into the

@@ -8,7 +8,8 @@ Full details live in [docs/style.md](docs/style.md); this is the short version.
 make            # build ./nhpm
 make test       # build and run the unit/integration tests
 make format     # apply clang-format
-make lint       # clang-format --dry-run, banned-function check, clang-tidy, cppcheck
+make lint       # comment length, clang-format --dry-run, banned functions, clang-tidy, cppcheck
+make comment-length-check   # just the comment-length check lint also runs
 make debug      # build with ASan/UBSan (see note below)
 make ci         # run every .github/workflows/ci.yml step locally, per available compiler
 ```

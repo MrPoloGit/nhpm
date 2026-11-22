@@ -123,12 +123,33 @@ typedef struct stack_check_result {
 
 void stack_check_result_free(stack_check_result *results);
 
-/* docs 11.7's "c": dry-runs every disabled patch against the source tree
- * as it stands (every enabled patch already applied, nothing else) and
- * reports each one's hunk-failure count. Read-only -- nothing is pushed,
- * popped, or written. *out_results (caller frees) has one entry per
- * disabled patch, in patch-list order; *out_count is 0 if there are none. */
+/* docs 11.7's "c": read-only dry-run of every disabled patch against the
+ * current tree. *out_results (caller frees) has one entry per disabled
+ * patch, in patch-list order; *out_count is 0 if there are none. */
 nhp_err stack_check_disabled(const inst_instance *inst, stack_check_result **out_results,
                              size_t *out_count);
+
+/* One file touched by more than one enabled patch (docs 11.9). `path` is
+ * relative to the source tree; `patch_ids` has `patch_count` entries,
+ * into inst->patches' ids, in patch-list order. */
+typedef struct stack_shared_file {
+    char *path;
+    char **patch_ids;
+    size_t patch_count;
+} stack_shared_file;
+
+void stack_shared_file_free(stack_shared_file *f);
+void stack_shared_files_free(stack_shared_file *files, size_t count);
+
+/* docs 11.9: cross-references every enabled patch's library
+ * `files_touched` and reports files more than one lists; best-effort,
+ * read-only. *out_files has one entry per shared file; 0 if there are none. */
+nhp_err stack_find_shared_files(const inst_instance *inst, stack_shared_file **out_files,
+                                size_t *out_count);
+
+/* docs 11.8's "u": restores the most recent "auto-"-labeled snapshot and
+ * re-syncs the Quilt folder to match. On success *inst is reloaded.
+ * NHP_ENOENT if there's no such snapshot. */
+nhp_err stack_undo(inst_instance *inst, stack_conflict *out_conflict);
 
 #endif /* NHPM_STACK_H */

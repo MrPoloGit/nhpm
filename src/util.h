@@ -93,6 +93,12 @@ char *str_trim(char *s);
  * if needle is "". NULL on OOM. */
 char *str_replace_all(const char *s, const char *needle, const char *replacement);
 
+/* Splits s on ASCII whitespace into str_dup'd tokens -- no shell, no
+ * quoting. *out_tokens is NULL and *out_count 0 if s is NULL or "".
+ * Caller frees with str_tokens_free(). */
+nhp_err str_split_whitespace(const char *s, char ***out_tokens, size_t *out_count);
+void str_tokens_free(char **tokens, size_t count);
+
 /* ---- growable byte buffer ---- */
 
 typedef struct buf {

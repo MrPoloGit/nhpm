@@ -3,6 +3,7 @@
  * and GNU patch installed. SPDX-License-Identifier: NGPL */
 #include "feature.h"
 #include "instance.h"
+#include "library.h"
 #include "quilt.h"
 #include "sources.h"
 #include "stack.h"
@@ -192,6 +193,104 @@ static void test_add_disabled_then_enable(void)
     });
 }
 
+static void test_undo_none(void)
+{
+    WITH_TEMP_INSTANCE({
+        stack_conflict conflict;
+        CHECK(stack_undo(&inst, &conflict) == NHP_ENOENT);
+    });
+}
+
+static void test_undo_enable(void)
+{
+    WITH_TEMP_INSTANCE({
+        char *src_dir = inst_source_full_path(&inst);
+
+        char *p01 = abs_patch("01-lamp-radius.diff");
+        size_t idx = SIZE_MAX;
+        stack_conflict conflict;
+        CHECK(stack_add(&inst, "t01", "1.0", "Lamp Radius", p01, "abc", false, &idx, &conflict) ==
+              NHP_OK);
+        free(p01);
+        /* fingerprint right after the add (disabled), before enabling --
+         * undo only reverts the enable, not the earlier add. */
+        unsigned long before = tree_fingerprint(src_dir);
+
+        CHECK(stack_enable(&inst, idx, &conflict) == NHP_OK);
+        CHECK(inst.patches[idx].enabled);
+
+        /* undoes the enable (the most recent auto: snapshot); the add
+         * itself is still there, just disabled again, same as right
+         * after stack_add(..., enable=false, ...) above. */
+        CHECK(stack_undo(&inst, &conflict) == NHP_OK);
+        CHECK(inst.patch_count == 1);
+        CHECK(!inst.patches[0].enabled);
+        CHECK(tree_fingerprint(src_dir) == before);
+
+        /* persisted: a fresh load agrees */
+        inst_instance reloaded;
+        CHECK(inst_load("stacktest", &reloaded) == NHP_OK);
+        CHECK(reloaded.patch_count == 1);
+        CHECK(!reloaded.patches[0].enabled);
+        inst_free(&reloaded);
+
+        free(src_dir);
+    });
+}
+
+static void test_undo_move(void)
+{
+    WITH_TEMP_INSTANCE({
+        /* t01 (src/light.c) and t02 (src/apply.c): independent files, so
+         * either order applies cleanly -- unlike 04/05 elsewhere in this
+         * file, which genuinely depend on their order. */
+        char *p01 = abs_patch("01-lamp-radius.diff");
+        char *p02 = abs_patch("02-apply-pickaxe.diff");
+        size_t idx01 = SIZE_MAX;
+        size_t idx02 = SIZE_MAX;
+        stack_conflict conflict;
+        CHECK(stack_add(&inst, "t01", "1.0", "Lamp Radius", p01, "abc", true, &idx01, &conflict) ==
+              NHP_OK);
+        CHECK(stack_add(&inst, "t02", "1.0", "Apply Pickaxe", p02, "abc", true, &idx02,
+                        &conflict) == NHP_OK);
+        free(p01);
+        free(p02);
+        CHECK(idx01 == 0 && idx02 == 1);
+
+        CHECK(stack_move(&inst, 0, 1, &conflict) == NHP_OK);
+        CHECK(str_eq(inst.patches[0].id, "t02"));
+        CHECK(str_eq(inst.patches[1].id, "t01"));
+
+        CHECK(stack_undo(&inst, &conflict) == NHP_OK);
+        CHECK(inst.patch_count == 2);
+        CHECK(str_eq(inst.patches[0].id, "t01"));
+        CHECK(str_eq(inst.patches[1].id, "t02"));
+        CHECK(inst.patches[0].enabled && inst.patches[1].enabled);
+    });
+}
+
+/* A manual snapshot taken after the auto: one must not be picked instead
+ * (docs 11.8: "not just the most recent snapshot overall"). */
+static void test_undo_skips_manual_snapshot(void)
+{
+    WITH_TEMP_INSTANCE({
+        char *p01 = abs_patch("01-lamp-radius.diff");
+        size_t idx = SIZE_MAX;
+        stack_conflict conflict;
+        CHECK(stack_add(&inst, "t01", "1.0", "Lamp Radius", p01, "abc", true, &idx, &conflict) ==
+              NHP_OK);
+        free(p01);
+        CHECK(inst.patches[idx].enabled);
+
+        char *manual_name = NULL;
+        CHECK(inst_snapshot_create("stacktest", "a manual checkpoint", &manual_name) == NHP_OK);
+        free(manual_name);
+
+        CHECK(stack_undo(&inst, &conflict) == NHP_OK);
+        CHECK(inst.patch_count == 0); /* back to before the add, not just before the snapshot */
+    });
+}
+
 static void test_dependent_patch_blocks_disable(void)
 {
     WITH_TEMP_INSTANCE({
@@ -243,10 +342,8 @@ static void test_check_disabled(void)
         size_t idx02 = SIZE_MAX;
         size_t idx03 = SIZE_MAX;
         stack_conflict conflict;
-        /* t01 enabled (changes src/light.c); t02 disabled (unrelated
-         * file, would apply cleanly); t03 disabled (also touches
-         * src/light.c's same line, so it conflicts with t01 already
-         * applied -- same pair test_enable_conflict_rolls_back uses). */
+        /* t01 enabled; t02 disabled (unrelated file, clean); t03
+         * disabled (same line as t01, so it conflicts once applied). */
         CHECK(stack_add(&inst, "t01", "1.0", "Lamp Radius", p01, "abc", true, &idx01, &conflict) ==
               NHP_OK);
         CHECK(stack_add(&inst, "t02", "1.0", "Apply Pickaxe", p02, "abc", false, &idx02,
@@ -303,6 +400,98 @@ static void test_check_disabled_none(void)
         CHECK(result_count == 0);
         CHECK(results == NULL);
         stack_check_result_free(results);
+    });
+}
+
+/* Imports a fixture .diff into the library (so it has real files_touched,
+ * docs section 8) and adds it to *inst from the library's own stored copy,
+ * same as the real add-from-library path. */
+static nhp_err add_from_library(inst_instance *inst, const char *fixture_name, const char *name,
+                                size_t *out_index)
+{
+    char *diff_path = abs_patch(fixture_name);
+    char *id = NULL;
+    nhp_err err = lib_import_local(diff_path, name, "me", "NetHack 3.6.7", "1.0", &id);
+    free(diff_path);
+    if (err != NHP_OK) {
+        return err;
+    }
+
+    char *stored_path = NULL;
+    err = lib_version_diff_path(id, "1.0", &stored_path);
+    if (err == NHP_OK) {
+        stack_conflict conflict;
+        err = stack_add(inst, id, "1.0", name, stored_path, "abc", true, out_index, &conflict);
+    }
+    free(stored_path);
+    free(id);
+    return err;
+}
+
+static void test_shared_files_detected(void)
+{
+    WITH_TEMP_INSTANCE({
+        size_t idx04 = SIZE_MAX;
+        size_t idx05 = SIZE_MAX;
+        /* both touch src/objects.c (same pair test_dependent_patch_blocks_disable
+         * uses); 05 depends on 04, so both apply cleanly together. */
+        CHECK(add_from_library(&inst, "04-new-scroll.diff", "New Scroll", &idx04) == NHP_OK);
+        CHECK(add_from_library(&inst, "05-depends-on-04-add-wand.diff", "Add Wand", &idx05) ==
+              NHP_OK);
+
+        stack_shared_file *shared = NULL;
+        size_t shared_count = 0;
+        CHECK(stack_find_shared_files(&inst, &shared, &shared_count) == NHP_OK);
+        CHECK(shared_count == 1);
+        if (shared_count == 1) {
+            CHECK(str_eq(shared[0].path, "src/objects.c"));
+            CHECK(shared[0].patch_count == 2);
+            bool has04 = false;
+            bool has05 = false;
+            for (size_t k = 0; k < shared[0].patch_count; k++) {
+                has04 = has04 || str_eq(shared[0].patch_ids[k], inst.patches[idx04].id);
+                has05 = has05 || str_eq(shared[0].patch_ids[k], inst.patches[idx05].id);
+            }
+            CHECK(has04 && has05);
+        }
+        stack_shared_files_free(shared, shared_count);
+    });
+}
+
+static void test_shared_files_none_when_disjoint(void)
+{
+    WITH_TEMP_INSTANCE({
+        size_t idx01 = SIZE_MAX;
+        /* t01 (src/light.c) alone: nothing else touches the same file. */
+        CHECK(add_from_library(&inst, "01-lamp-radius.diff", "Lamp Radius", &idx01) == NHP_OK);
+
+        stack_shared_file *shared = NULL;
+        size_t shared_count = SIZE_MAX;
+        CHECK(stack_find_shared_files(&inst, &shared, &shared_count) == NHP_OK);
+        CHECK(shared_count == 0);
+        CHECK(shared == NULL);
+        stack_shared_files_free(shared, shared_count);
+    });
+}
+
+/* A patch added straight from a file (not through the library, like
+ * stack_add() in every other test here) has no files_touched to find --
+ * best-effort, not an error (docs 11.9). */
+static void test_shared_files_best_effort_skips_non_library_patch(void)
+{
+    WITH_TEMP_INSTANCE({
+        char *p01 = abs_patch("01-lamp-radius.diff");
+        size_t idx = SIZE_MAX;
+        stack_conflict conflict;
+        CHECK(stack_add(&inst, "not-in-library", "1.0", "Lamp Radius", p01, "abc", true, &idx,
+                        &conflict) == NHP_OK);
+        free(p01);
+
+        stack_shared_file *shared = NULL;
+        size_t shared_count = SIZE_MAX;
+        CHECK(stack_find_shared_files(&inst, &shared, &shared_count) == NHP_OK);
+        CHECK(shared_count == 0);
+        stack_shared_files_free(shared, shared_count);
     });
 }
 
@@ -847,9 +1036,16 @@ int main(void)
 {
     test_add_strip_detection();
     test_add_disabled_then_enable();
+    test_undo_none();
+    test_undo_enable();
+    test_undo_move();
+    test_undo_skips_manual_snapshot();
     test_dependent_patch_blocks_disable();
     test_check_disabled();
     test_check_disabled_none();
+    test_shared_files_detected();
+    test_shared_files_none_when_disjoint();
+    test_shared_files_best_effort_skips_non_library_patch();
     test_enable_conflict_rolls_back();
     test_move();
     test_remove();

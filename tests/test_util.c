@@ -3,6 +3,7 @@
 #include "feature.h"
 #include "util.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,6 +63,28 @@ static void test_str_replace_all(void)
     free(r);
 
     CHECK(str_replace_all(NULL, "$PREFIX", "/x") == NULL);
+}
+
+static void test_str_split_whitespace(void)
+{
+    char **tokens = NULL;
+    size_t count = 0;
+
+    CHECK(str_split_whitespace("a  b\tc", &tokens, &count) == NHP_OK);
+    CHECK(count == 3);
+    CHECK(str_eq(tokens[0], "a") && str_eq(tokens[1], "b") && str_eq(tokens[2], "c"));
+    str_tokens_free(tokens, count);
+
+    tokens = NULL;
+    count = SIZE_MAX;
+    CHECK(str_split_whitespace("", &tokens, &count) == NHP_OK);
+    CHECK(tokens == NULL && count == 0);
+    str_tokens_free(tokens, count);
+
+    tokens = NULL;
+    count = SIZE_MAX;
+    CHECK(str_split_whitespace(NULL, &tokens, &count) == NHP_OK);
+    CHECK(tokens == NULL && count == 0);
 }
 
 static void test_buf(void)
@@ -204,6 +227,7 @@ int main(void)
 {
     test_str_helpers();
     test_str_replace_all();
+    test_str_split_whitespace();
     test_buf();
     test_path_join();
     test_path_is_safe();

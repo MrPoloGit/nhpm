@@ -78,12 +78,32 @@ build/tests/%: tests/%.c $(LIB_OBJ)
 
 FMT_FILES := $(wildcard src/*.c src/*.h src/ui/*.c src/ui/*.h tests/*.c tests/*.h)
 
+# tests/run.sh, Makefile itself, and every workflow -- the '#'-comment
+# half of the comment-length check below (docs/style.md 7/9/10).
+HASH_COMMENT_FILES := tests/run.sh Makefile $(wildcard .github/workflows/*.yml)
+COMMENT_MAX_LINES  := 3
+
 format:
 	clang-format -i $(FMT_FILES)
 
 BANNED := strcpy|strcat|sprintf|gets|strtok|atoi|atol|system|popen|tmpnam|mktemp
 
-lint:
+comment-length-check:
+	@echo "== comment length (docs/style.md 6.10/7/9/10, max $(COMMENT_MAX_LINES) lines) =="
+	@status=0; \
+	awk -v max=$(COMMENT_MAX_LINES) 'FNR==1{in_c=0} !in_c&&/^[ \t]*\/\*/{in_c=1;start=FNR} \
+		in_c&&/\*\//{span=FNR-start+1; if(span>max){printf "%s:%d: /* */ comment spans %d lines (max %d)\n",FILENAME,start,span,max; bad++}; in_c=0} \
+		END{exit(bad>0)}' $(FMT_FILES) || status=1; \
+	awk -v max=$(COMMENT_MAX_LINES) 'FNR==1{run=0} /^[ \t]*#/&&!/^#!/{if(run==0)start=FNR; run++; next} \
+		{if(run>max){printf "%s:%d: # comment run spans %d lines (max %d)\n",FILENAME,start,run,max; bad++}; run=0} \
+		END{if(run>max){printf "%s:%d: # comment run spans %d lines (max %d)\n",FILENAME,start,run,max; bad++}; exit(bad>0)}' \
+		$(HASH_COMMENT_FILES) || status=1; \
+	if [ $$status -ne 0 ]; then \
+		echo "error: a comment exceeds $(COMMENT_MAX_LINES) lines, see docs/style.md section 6.10"; \
+		exit 1; \
+	fi
+
+lint: comment-length-check
 	@echo "== clang-format --dry-run --Werror =="
 	clang-format --dry-run --Werror $(FMT_FILES)
 	@echo "== banned functions (docs/style.md section 6.8) =="
@@ -139,4 +159,4 @@ ci:
 	done
 	@echo "ci: all checks passed ($(CI_CCS))"
 
-.PHONY: debug test format lint install clean ci
+.PHONY: debug test format lint comment-length-check install clean ci

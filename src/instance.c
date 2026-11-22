@@ -1104,7 +1104,9 @@ nhp_err inst_snapshot_list(const char *name, inst_snapshot **out_snapshots, size
         return err;
     }
 
-    qsort(list, count, sizeof(*list), compare_snapshot_filenames);
+    if (count > 0) {
+        qsort(list, count, sizeof(*list), compare_snapshot_filenames);
+    }
     *out_snapshots = list;
     *out_count = count;
     return NHP_OK;

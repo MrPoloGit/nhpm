@@ -209,6 +209,62 @@ char *str_replace_all(const char *s, const char *needle, const char *replacement
     return buf_take(&out);
 }
 
+nhp_err str_split_whitespace(const char *s, char ***out_tokens, size_t *out_count)
+{
+    *out_tokens = NULL;
+    *out_count = 0;
+    if (s == NULL || s[0] == '\0') {
+        return NHP_OK;
+    }
+
+    char *copy = str_dup(s);
+    if (copy == NULL) {
+        return NHP_ENOMEM;
+    }
+    size_t cap = 4;
+    char **tokens = malloc(cap * sizeof(*tokens));
+    if (tokens == NULL) {
+        free(copy);
+        return NHP_ENOMEM;
+    }
+
+    size_t count = 0;
+    char *saveptr = NULL;
+    const char *tok = strtok_r(copy, " \t", &saveptr);
+    while (tok != NULL) {
+        if (count == cap) {
+            cap *= 2;
+            char **grown = realloc(tokens, cap * sizeof(*grown));
+            if (grown == NULL) {
+                str_tokens_free(tokens, count);
+                free(copy);
+                return NHP_ENOMEM;
+            }
+            tokens = grown;
+        }
+        tokens[count] = str_dup(tok);
+        if (tokens[count] == NULL) {
+            str_tokens_free(tokens, count);
+            free(copy);
+            return NHP_ENOMEM;
+        }
+        count++;
+        tok = strtok_r(NULL, " \t", &saveptr);
+    }
+    free(copy);
+    *out_tokens = tokens;
+    *out_count = count;
+    return NHP_OK;
+}
+
+void str_tokens_free(char **tokens, size_t count)
+{
+    for (size_t i = 0; i < count; i++) {
+        free(tokens[i]);
+    }
+    free(tokens);
+}
+
 /* ---- growable byte buffer ---- */
 
 void buf_init(buf *b)

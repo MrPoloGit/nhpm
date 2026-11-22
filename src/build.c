@@ -61,72 +61,6 @@ static nhp_err run_build_step(const char *src_dir, const char *const *argv, cons
     return failed ? NHP_EIO : NHP_OK;
 }
 
-/* Splits `s` on whitespace into str_dup'd argv entries -- no shell, no
- * quoting (used for both `make_vars`, docs/features.md 10.2, and each
- * command in `custom_commands`, 10.6). *out_tokens is NULL and *out_count
- * 0 if `s` is "". */
-static nhp_err tokenize_whitespace(const char *s, char ***out_tokens, size_t *out_count)
-{
-    *out_tokens = NULL;
-    *out_count = 0;
-    if (s == NULL || s[0] == '\0') {
-        return NHP_OK;
-    }
-
-    char *copy = str_dup(s);
-    if (copy == NULL) {
-        return NHP_ENOMEM;
-    }
-    size_t cap = 4;
-    char **tokens = malloc(cap * sizeof(*tokens));
-    if (tokens == NULL) {
-        free(copy);
-        return NHP_ENOMEM;
-    }
-
-    size_t count = 0;
-    char *saveptr = NULL;
-    const char *tok = strtok_r(copy, " \t", &saveptr);
-    while (tok != NULL) {
-        if (count == cap) {
-            cap *= 2;
-            char **grown = realloc(tokens, cap * sizeof(*grown));
-            if (grown == NULL) {
-                for (size_t i = 0; i < count; i++) {
-                    free(tokens[i]);
-                }
-                free(tokens);
-                free(copy);
-                return NHP_ENOMEM;
-            }
-            tokens = grown;
-        }
-        tokens[count] = str_dup(tok);
-        if (tokens[count] == NULL) {
-            for (size_t i = 0; i < count; i++) {
-                free(tokens[i]);
-            }
-            free(tokens);
-            free(copy);
-            return NHP_ENOMEM;
-        }
-        count++;
-        tok = strtok_r(NULL, " \t", &saveptr);
-    }
-    free(copy);
-    *out_tokens = tokens;
-    *out_count = count;
-    return NHP_OK;
-}
-
-static void free_tokens(char **tokens, size_t count)
-{
-    for (size_t i = 0; i < count; i++) {
-        free(tokens[i]);
-    }
-    free(tokens);
-}
-
 /* "make <verb> PREFIX=<install_dir> <extra_tokens...>". */
 static nhp_err run_make_step(const char *src_dir, const char *verb, const char *prefix_arg,
                              char *const *extra_tokens, size_t extra_count, const char *label,
@@ -180,7 +114,7 @@ static nhp_err run_unix_recipe(const char *src_dir, const char *install_dir, con
 
     char **extra_tokens = NULL;
     size_t extra_count = 0;
-    err = tokenize_whitespace(make_vars, &extra_tokens, &extra_count);
+    err = str_split_whitespace(make_vars, &extra_tokens, &extra_count);
     if (err != NHP_OK) {
         return err;
     }
@@ -198,16 +132,13 @@ static nhp_err run_unix_recipe(const char *src_dir, const char *install_dir, con
     }
 
     free(prefix_arg);
-    free_tokens(extra_tokens, extra_count);
+    str_tokens_free(extra_tokens, extra_count);
     return err;
 }
 
-/* docs/features.md 10.6's `custom` recipe: `commands` is instance.conf's
- * `custom_commands`, ';'-separated, each then split on whitespace into argv
- * the same way `make_vars` is -- no shell, no quoting. Every literal
- * "$PREFIX" is replaced with `install_dir` first, same as the built-in
- * recipes' own PREFIX=<install_dir>. Runs each command in order, stopping
- * at the first failure. NHP_EINVAL if there are none. */
+/* docs/features.md 10.6's `custom` recipe: splits `commands`
+ * (instance.conf's `custom_commands`) and runs each in order, stopping at
+ * the first failure. NHP_EINVAL if there are none. */
 static nhp_err run_custom_recipe(const char *src_dir, const char *install_dir,
                                  const char *commands, proc_line_fn on_line, void *user_data,
                                  buf *log)
@@ -229,7 +160,7 @@ static nhp_err run_custom_recipe(const char *src_dir, const char *install_dir,
     while (line != NULL && err == NHP_OK) {
         char **tokens = NULL;
         size_t count = 0;
-        err = tokenize_whitespace(line, &tokens, &count);
+        err = str_split_whitespace(line, &tokens, &count);
         if (err == NHP_OK && count > 0) {
             char **argv = malloc((count + 1) * sizeof(*argv));
             if (argv == NULL) {
@@ -245,7 +176,7 @@ static nhp_err run_custom_recipe(const char *src_dir, const char *install_dir,
                 free(argv);
             }
         }
-        free_tokens(tokens, count);
+        str_tokens_free(tokens, count);
         line = strtok_r(NULL, ";", &saveptr);
     }
 
