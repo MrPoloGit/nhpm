@@ -1,0 +1,31 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd"><html><head><title>NHPatchDB : messagetype option</title><link rel="icon" href="bilious.png"><link rel="stylesheet" type="text/css" media="screen" href="nhpmdb.css"><script src="nhpmdb.js" defer></script><meta name="description" content="Add a new configuration option MSGTYPE" /></head><body><h2 class="maintitle">NetHack Patch Database<span class="versnum"> v0.27</span></h2><div class="patchcount">323 patches</div><div class="menu">( <a href="/">Main</a> | <a href="/?add">Add</a> | <a href="/?browse">Browse</a> | <a href="/?search">Search</a> | <a href="/?random">Random</a> | <a href="/?contact">Contact</a> | <a href="/?faq">FAQ</a> )</div><hr><h3 class="title">messagetype option</h3><table class="patchshow"><tr class="odd"><td class="rowname">Name</td><td>messagetype option v0.2</td></tr><tr class="odd"><td class="rowname">Rating</td><td><span class="ratingbar"><span class="rating ratingw100"></span><span class="ratingtext">100%</span></span></td></tr><tr class="odd"><td class="rowname">Author</td><td><a href="/cdn-cgi/l/email-protection#c7b7a6bfa2a3878787a6abb3e7a3a8b3e7a8b5a0" rel="nofollow ugc noopener">Pasi Kallinen</a></td></tr><tr class="odd"><td class="rowname">For</td><td>NetHack 3.4.3</td></tr><tr class="odd"><td class="rowname">Description</td><td>Add a new configuration option MSGTYPE</td></tr><tr class="odd"><td class="rowname">&nbsp;</td><td>This allows the user to configure whether a message always waits for --more--,
+<br>or if it's never shown, or if it's never shown more than once in row.
+<br>
+<br>The format is
+<br>MSGTYPE=foo &quot;string to match&quot;
+<br>Where &quot;foo&quot; is one of &quot;hide&quot;, &quot;stop&quot;, &quot;norep&quot; or &quot;show&quot;, and the string to match
+<br>is a message to be matched, with '*' and '?' wildcard expansion.
+<br>
+<br>&quot;hide&quot; hides the message, so it's never shown.
+<br>&quot;stop&quot; always prompts for --more-- after the message.
+<br>&quot;norep&quot; shows the message, but not again if no other message is shown in between.
+<br>&quot;show&quot; always shows the message.
+<br>
+<br>(&quot;noshow&quot; is an alias to &quot;hide&quot;, and &quot;more&quot; is an alias to &quot;stop&quot;)
+<br>
+<br>
+<br>For example:
+<br>
+<br># displacing pets
+<br>MSGTYPE=hide  &quot;You displaced *&quot;
+<br># items on floor
+<br>MSGTYPE=norep &quot;You see here a *&quot;
+<br>MSGTYPE=norep &quot;You see here an *&quot;
+<br># delayed instadeaths
+<br>MSGTYPE=stop  &quot;You are slowing down.&quot;
+<br>MSGTYPE=stop  &quot;You find it hard to breathe.&quot;
+<br>MSGTYPE=stop  &quot;You are turning a little *&quot;
+<br>
+<br>
+<br>This patch does not break saves or bones.</td></tr><tr class="odd"><td class="rowname">Download</td><td><a href="https://bilious.alt.org/~paxed/nethack/nh343-msgtype.diff" rel="nofollow ugc noopener">http://bilious.alt.org/~paxed/nethack/nh343-msgtype.diff</a> (5.2 Kb)</td></tr><tr class="odd"><td class="rowname">Added</td><td>September 22, 2010 11:09</td></tr><tr class="odd"><td class="rowname">Changed</td><td>January 12, 2011 20:16</td></tr><tr class="odd"><td colspan="2"><span class="submitupdate"><a href="/?update=397">Submit an update to this patch</a></span></td></tr></table><h3 class="title">2 Comments</h3><table class="commentshow"><tr class="oddcomment"><td class="commentscore" rowspan="2">5</td><td class="commentuser"><a name="797">mellenyes11</a></td><td class="commentdate">January 23, 2025 16:22</td></tr><tr class="oddcomment"><td class="commenttext" colspan="3">Download link gives error 404
+<br>Please fix, I need this thing! (I don't feel like updating to NH 3.6.7 while I haven't ascended in 3.4.3. Yes I know I'm a noob and it's 2025.)<span class="commentact">[<a href="/?397&amp;quote=797#addcomment">Quote</a>]</span></td></tr><tr class="evencomment"><td class="commentscore" rowspan="2">5</td><td class="commentuser"><a name="528">scummos</a></td><td class="commentdate">September 22, 2010 12:29</td></tr><tr class="evencomment"><td class="commenttext" colspan="3">Nice, thank you.<span class="commentact">[<a href="/?397&amp;quote=528#addcomment">Quote</a>]</span></td></tr></table><h3 class="title" id="addcomment">Add a comment</h3><form name="commentform" method="POST" action="/?397"><input name="patch" type="hidden" value="397"><table class="commentform"><tr><td class="rowname">Name</td><td><input type="text" name="username" size="20" maxlength="20" value=""> (<label><input type="checkbox" name="remembername" id="checkbox_remembername"> Remember name</label>)</td><td>required</td></tr><tr><td class="rowname">Rating</td><td><select name="score"><option selected value="-1"></option><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option></select> (0 is worst, 5 is best)</td><td>&nbsp;</td></tr><tr><td class="rowname">Comment</td><td><textarea name="text" rows="5" cols="70" class="wide" data-limit="1024" data-counter="commentlimit"></textarea></td><td>required</td></tr><tr><td class="rowname"></td><td>You can use up to <span id="commentlimit">1024</span> characters.</td><td></td></tr><tr><td class="rowname"></td><td>Only supported tag is [url]clickable_link[/url].</td><td></td></tr><tr><td colspan="3"><label><input type="checkbox" checked name="preview">Preview</label></td></tr><tr><td colspan="3"><p class="nhquestion">You will need to answer the following question correctly: What symbol represents a gem or a rock? <input type="text" name="nhquestionanswer" size="1" maxlength="1"><input name="nhquestionid" type="hidden" value="1"></p></td></tr><tr><td colspan="3"><input type="submit" value="Add comment"><input type="reset" value="Reset"></td></tr></table></form><script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script></body></html>

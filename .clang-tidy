@@ -1,0 +1,48 @@
+Checks: >
+  bugprone-*,
+  cert-*,
+  clang-analyzer-*,
+  misc-*,
+  readability-identifier-naming,
+  readability-function-size,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-macro-parentheses,
+  -cert-dcl37-c,
+  -cert-dcl51-cpp,
+  -cert-str34-c,
+  -misc-no-recursion,
+  -misc-include-cleaner,
+  -clang-analyzer-security.insecureAPI.DeprecatedOrUnsafeBufferHandling,
+  -clang-analyzer-security.ArrayBound,
+  -cert-err34-c,
+  -bugprone-unchecked-string-to-number-conversion,
+  -bugprone-multi-level-implicit-pointer-conversion,
+  -bugprone-signed-bitwise
+WarningsAsErrors: ''
+HeaderFilterRegex: 'src/.*'
+FormatStyle: file
+CheckOptions:
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.ParameterCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.StaticConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.ConstantCase
+    value: lower_case
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionIgnoredRegexp
+    value: '^(log_(debug|info|warn|error)|_XOPEN_SOURCE|_DARWIN_C_SOURCE)$'
+  - key: bugprone-reserved-identifier.AllowedIdentifiers
+    value: '_XOPEN_SOURCE;_DARWIN_C_SOURCE'
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.TypedefNameCase
+    value: lower_case
+  - key: readability-function-size.LineThreshold
+    value: '80'

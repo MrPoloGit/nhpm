@@ -1,0 +1,16 @@
+/build/
+/nhpm
+*.o
+*.d
+*.swp
+*.swo
+*~
+.DS_Store
+compile_commands.json
+.cache/
+.vscode/
+.idea/
+core
+core.*
+vgcore.*
+*.dSYM/

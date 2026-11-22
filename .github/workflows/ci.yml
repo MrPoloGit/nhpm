@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cc: [gcc, clang]
+    env:
+      CC: ${{ matrix.cc }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libncursesw5-dev libcurl4-openssl-dev libxml2-dev \
+            quilt patch diffutils git \
+            clang clang-format clang-tidy cppcheck valgrind
+
+      - name: Lint
+        run: make lint CFLAGS="-Werror"
+
+      - name: Build
+        run: make CFLAGS="-Werror"
+
+      - name: Test
+        run: make test CFLAGS="-Werror"
+
+      - name: Clean before the sanitizer build
+        run: make clean
+
+      - name: Test under ASan/UBSan
+        run: make test CFLAGS="-O0 -g -fsanitize=address,undefined -Werror" LDLIBS="-fsanitize=address,undefined"

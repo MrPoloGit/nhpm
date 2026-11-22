@@ -1,0 +1,11 @@
+--- a/src/light.c	2026-11-16 13:16:56.717777645 -0800
++++ b/src/light.c	2026-11-16 13:17:08.416676148 -0800
+@@ -18,7 +18,7 @@ int light_radius(const char *source)
+         return 1;
+     }
+     if (strcmp_fixture(source, "lamp") == 0) {
+-        return 2;
++        return 5;
+     }
+     if (strcmp_fixture(source, "lantern") == 0) {
+         return 3;

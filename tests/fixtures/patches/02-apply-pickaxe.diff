@@ -1,0 +1,11 @@
+--- src/apply.c	2026-11-16 13:16:56.716691104 -0800
++++ src/apply.c	2026-11-16 13:18:08.292656376 -0800
+@@ -13,7 +13,7 @@
+ 
+ static void apply_pick_axe(void)
+ {
+-    printf("You dig downward.\n");
++    printf("You dig downward and find a fake amulet.\n");
+ }
+ 
+ static void apply_mirror(void)

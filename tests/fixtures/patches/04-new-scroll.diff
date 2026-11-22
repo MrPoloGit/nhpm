@@ -1,0 +1,10 @@
+--- a/src/objects.c	2026-11-16 13:16:56.718296353 -0800
++++ b/src/objects.c	2026-11-16 13:19:20.794820012 -0800
+@@ -11,6 +11,7 @@ static const struct fake_object objects[
+     {"long sword", 40},
+     {"leather armor", 150},
+     {"potion", 20},
++    {"scroll", 5},
+ };
+ 
+ const char *object_name(int index)
