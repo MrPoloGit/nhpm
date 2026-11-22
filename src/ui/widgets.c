@@ -154,11 +154,11 @@ void ui_draw_panel(WINDOW *win, const char *title)
     }
 }
 
-bool ui_prompt_line(ui_app *app, const char *prompt, char *buf, size_t bufsize,
+bool ui_prompt_line(ui_app *app, const char *prompt, char *out, size_t out_size,
                     void (*redraw)(ui_app *app))
 {
     char edit[256];
-    (void)snprintf(edit, sizeof(edit), "%s", buf);
+    (void)snprintf(edit, sizeof(edit), "%s", out);
     app->text_input_active = true;
 
     for (;;) {
@@ -174,7 +174,7 @@ bool ui_prompt_line(ui_app *app, const char *prompt, char *buf, size_t bufsize,
             continue;
         }
         if (ch == L'\n' || ch == KEY_ENTER) {
-            (void)snprintf(buf, bufsize, "%s", edit);
+            (void)snprintf(out, out_size, "%s", edit);
             app->text_input_active = false;
             return true;
         }
@@ -443,11 +443,11 @@ bool ui_show_popup_menu(ui_app *app, const char *title, const char *const *optio
     return committed;
 }
 
-bool ui_show_popup_input(ui_app *app, const char *title, char *buf, size_t bufsize,
+bool ui_show_popup_input(ui_app *app, const char *title, char *out, size_t out_size,
                          void (*redraw)(ui_app *app))
 {
     char edit[256];
-    (void)snprintf(edit, sizeof(edit), "%s", buf);
+    (void)snprintf(edit, sizeof(edit), "%s", out);
 
     int max_y = 0;
     int max_x = 0;
@@ -549,7 +549,7 @@ bool ui_show_popup_input(ui_app *app, const char *title, char *buf, size_t bufsi
     (void)doupdate();
 
     if (committed) {
-        (void)snprintf(buf, bufsize, "%s", edit);
+        (void)snprintf(out, out_size, "%s", edit);
     }
     return committed;
 }

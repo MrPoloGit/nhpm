@@ -75,9 +75,9 @@ void ui_text_view_draw(const ui_text_view *view, WINDOW *win, int first_line, in
 void ui_draw_panel(WINDOW *win, const char *title);
 
 /* A blocking single-line prompt in the status line (13.5); `redraw` runs
- * before every key so what's behind stays current. `buf` is pre-filled for
+ * before every key so what's behind stays current. `out` is pre-filled for
  * editing; Enter commits (returns true), Esc leaves it untouched (false). */
-bool ui_prompt_line(ui_app *app, const char *prompt, char *buf, size_t bufsize,
+bool ui_prompt_line(ui_app *app, const char *prompt, char *out, size_t out_size,
                     void (*redraw)(ui_app *app));
 
 /* A blocking y/N confirmation in the status line. 'y'/'Y' confirms;
@@ -98,8 +98,8 @@ bool ui_show_popup_menu(ui_app *app, const char *title, const char *const *optio
 
 /* Like ui_prompt_line(), but in the floating panel-backed box from
  * ui_show_popup_menu() -- for free text (a name, path, git tag). Enter
- * commits (buf holds the text, true); Esc leaves it untouched (false). */
-bool ui_show_popup_input(ui_app *app, const char *title, char *buf, size_t bufsize,
+ * commits (out holds the text, true); Esc leaves it untouched (false). */
+bool ui_show_popup_input(ui_app *app, const char *title, char *out, size_t out_size,
                          void (*redraw)(ui_app *app));
 
 #endif /* NHPM_UI_WIDGETS_H */

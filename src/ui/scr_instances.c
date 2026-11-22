@@ -94,7 +94,7 @@ static void draw_row(WINDOW *win, int y, int width, size_t index, bool selected,
 
     char built[32];
     built_column(inst, built, sizeof(built));
-    char built_padded[13];
+    char built_padded[sizeof(built)];
     (void)snprintf(built_padded, sizeof(built_padded), "%-12s", built);
 
     char last_played[32];
