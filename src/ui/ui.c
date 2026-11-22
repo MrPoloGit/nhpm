@@ -61,7 +61,7 @@ static void open_debug_log(void)
         return;
     }
     g_debug_log_path = path;
-    (void)fprintf(g_debug_log, "nhpm %s debug log, started %s\n", NHP_VERSION, stamp);
+    (void)fprintf(g_debug_log, "nhpm %s debug log, started %s\n", NHPM_VERSION, stamp);
     (void)fflush(g_debug_log);
 }
 

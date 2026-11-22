@@ -2154,7 +2154,7 @@ int main(int argc, char **argv)
 {
     for (int i = 1; i < argc; i++) {
         if (str_eq(argv[i], "--version") || str_eq(argv[i], "-V")) {
-            (void)printf("nhpm %s\n", NHP_VERSION);
+            (void)printf("nhpm %s\n", NHPM_VERSION);
             return 0;
         }
         if (str_eq(argv[i], "--help") || str_eq(argv[i], "-h")) {
@@ -2182,7 +2182,7 @@ int main(int argc, char **argv)
         (void)fprintf(stderr, "nhpm: could not open the log file: %s\n", err_get());
         /* Not fatal: carry on without a log. */
     }
-    log_info("main", "nhpm %s starting", NHP_VERSION);
+    log_info("main", "nhpm %s starting", NHPM_VERSION);
 
     int result;
     if (argc > 1) {

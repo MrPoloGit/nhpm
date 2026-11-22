@@ -1,0 +1,58 @@
+name: Release
+
+# No native Windows build here on purpose -- see docs/tools-libraries.md
+# section 3 ("Windows: no native build, by design") for why.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: linux-x86_64
+          - os: macos-13
+            asset: macos-x86_64
+          - os: macos-latest
+            asset: macos-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libncursesw5-dev libcurl4-openssl-dev libxml2-dev pkg-config \
+            quilt patch diffutils tar gzip unzip git
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ncurses curl libxml2 pkg-config quilt
+
+      - name: Build
+        run: make VERSION="${GITHUB_REF_NAME}" CFLAGS="-O2 -Werror"
+
+      - name: Test
+        run: make test VERSION="${GITHUB_REF_NAME}" CFLAGS="-O2 -Werror"
+
+      - name: Package
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          dir="nhpm-${tag}-${{ matrix.asset }}"
+          mkdir "$dir"
+          cp nhpm README.md LICENSE "$dir"/
+          tar -czf "${dir}.tar.gz" "$dir"
+          echo "ASSET_PATH=${dir}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" "${ASSET_PATH}" --clobber

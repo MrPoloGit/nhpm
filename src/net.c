@@ -57,7 +57,7 @@ static CURL *make_curl(const char *url)
     curl_easy_setopt(curl, CURLOPT_TIMEOUT, NET_TIMEOUT_SECONDS);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    curl_easy_setopt(curl, CURLOPT_USERAGENT, "nhpm/" NHP_VERSION);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "nhpm/" NHPM_VERSION);
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
     return curl;
 }

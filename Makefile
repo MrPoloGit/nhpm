@@ -2,24 +2,25 @@ CC      ?= cc
 PREFIX  ?= /usr/local
 DESTDIR ?=
 
-# On macOS, Homebrew's ncurses is keg-only (it would conflict with the
-# system one), so its .pc files -- in particular panelw.pc, which the system
-# ncurses shim doesn't provide at all -- aren't on the default pkg-config
-# path. Add them when present, as docs/nhpm-plan.md section 1 calls for
-# ("the build uses Homebrew's ncurses through pkg-config when available").
-# This has to be passed to pkg-config's own environment inline (rather than
-# via "export", which $(shell ...) calls made while parsing the Makefile
-# don't see on every `make` version) since PKG_CFLAGS/PKG_LIBS below are
-# themselves resolved with $(shell ...) at parse time.
+# What `nhpm --version` reports: the release tag in CI (release.yml passes
+# VERSION=), else the nearest git tag/commit, else plain "0.1" outside a
+# git checkout.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null)
+ifeq ($(strip $(VERSION)),)
+VERSION := 0.1
+endif
+
+# Homebrew's ncurses is keg-only; panelw.pc isn't on the default pkg-config
+# path (docs/tools-libraries.md section 3), so add it when present. Passed
+# inline, not "export"ed, since $(shell ...) below may not see that.
 BREW_NCURSES_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix ncurses 2>/dev/null)
 ifneq ($(strip $(BREW_NCURSES_PREFIX)),)
 PKG_CONFIG_PATH_EXTRA := $(BREW_NCURSES_PREFIX)/lib/pkgconfig
 endif
 
-# M1 adds libcurl/libxml-2.0 (net.c, site.c); M7 adds ncursesw/panelw (src/ui).
-# Linking against them now, even though nothing in src/ calls into them yet,
-# matches the final shape of the project (docs/nhpm-plan.md section 1) and
-# avoids rewriting this file milestone by milestone.
+# M1 adds libcurl/libxml-2.0, M7 adds ncursesw/panelw; linking against all
+# of them now matches the project's final shape (docs/nhpm-plan.md section 1)
+# instead of rewriting this file milestone by milestone.
 PKGS       := ncursesw panelw libcurl libxml-2.0
 PKG_CONFIG := PKG_CONFIG_PATH="$(PKG_CONFIG_PATH_EXTRA):$$PKG_CONFIG_PATH" pkg-config
 PKG_CFLAGS := $(shell $(PKG_CONFIG) --cflags $(PKGS) 2>/dev/null)
@@ -28,20 +29,14 @@ ifeq ($(strip $(PKG_LIBS)),)
 PKG_LIBS := -lncursesw -lpanelw -lcurl -lxml2
 endif
 
-WARN = -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -Wmissing-prototypes \
-       -Wformat=2 -Wundef -Wcast-qual -Wwrite-strings -Wnull-dereference -Wdouble-promotion
+WARN := -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -Wmissing-prototypes \
+        -Wformat=2 -Wundef -Wcast-qual -Wwrite-strings -Wnull-dereference -Wdouble-promotion
 
 CFLAGS  ?= -O2
-# -MMD -MP: alongside each .o, write a .d file listing the headers it
-# actually included, so editing a header rebuilds every .c that depends
-# on it -- not just the ones that happen to #include it directly. Without
-# this, `make` after a header-only change can silently link some
-# translation units against the old layout and others against the new
-# one (same struct, different member offsets in each .o), which doesn't
-# fail to build -- it produces a binary that reads its own data at the
-# wrong offsets and corrupts or crashes at runtime, far from the edit
-# that caused it.
-override CFLAGS += -std=c11 $(WARN) -Isrc $(PKG_CFLAGS) -MMD -MP
+# -MMD -MP: per-.o header dependency tracking, so a header-only edit
+# rebuilds every .c that depends on it, not just direct #includes -- see
+# docs/nhpm-plan.md section 1 for why a stale .o here is dangerous.
+override CFLAGS += -std=c11 $(WARN) -Isrc $(PKG_CFLAGS) -MMD -MP -DNHPM_VERSION='"$(VERSION)"'
 override LDLIBS += $(PKG_LIBS)
 
 SRC      := $(wildcard src/*.c src/ui/*.c)
@@ -114,10 +109,9 @@ install: nhpm
 clean:
 	rm -rf build nhpm
 
-# Runs the same steps as .github/workflows/ci.yml (lint, build, test, then
-# test again under ASan/UBSan). With an explicit CC= (e.g. to work around
-# Apple clang's ASan deadlock, see CONTRIBUTING.md), runs with that compiler
-# only; otherwise once per compiler actually available here.
+# Runs the same steps as .github/workflows/ci.yml, per compiler available
+# (or just CC= if given explicitly, e.g. for Apple clang's ASan deadlock --
+# see CONTRIBUTING.md).
 ifeq ($(origin CC),command line)
 CI_CCS := $(CC)
 else ifeq ($(origin CC),environment)

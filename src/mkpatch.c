@@ -545,7 +545,7 @@ char *mkp_format_header(const mkp_header_info *info, const char *now_iso8601)
     if (info->nethack_version != NULL && info->nethack_version[0] != '\0') {
         buf_append_fmt(&b, "NetHack:   %s\n", info->nethack_version);
     }
-    buf_append_fmt(&b, "Created:   %s by nhpm %s\n", now_iso8601, NHP_VERSION);
+    buf_append_fmt(&b, "Created:   %s by nhpm %s\n", now_iso8601, NHPM_VERSION);
     buf_append_fmt(&b, "Apply:     %s\n", info->apply_hint);
 
     if (info->short_desc != NULL && info->short_desc[0] != '\0') {

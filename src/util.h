@@ -13,7 +13,12 @@
 #define NHP_PRINTF(fmt_idx, args_idx)
 #endif
 
-#define NHP_VERSION      "0.1"
+/* Normally set by the Makefile from `git describe` (dev builds) or the
+ * release tag (CI, see .github/workflows/release.yml); this is only the
+ * fallback for a translation unit built some other way. */
+#ifndef NHPM_VERSION
+#define NHPM_VERSION "0.1"
+#endif
 #define NHP_ARRAY_LEN(a) (sizeof(a) / sizeof((a)[0]))
 
 /* Error codes returned by functions throughout nhpm. NHP_OK (0) is

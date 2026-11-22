@@ -90,6 +90,14 @@ install: nhpm
 ncurses functions (`add_wch`, `mvaddwstr`, `get_wch`) along with the POSIX functions used. If `pkg-config` names differ (`ncursesw` vs `ncurses`), the Makefile
 falls back to `-lncursesw -lpanelw`.
 
+The real Makefile also adds `-MMD -MP` to `CFLAGS`: alongside each `.o`, this writes a `.d`
+file listing the headers that translation unit actually included, so editing a header
+rebuilds every `.c` that depends on it, not just the ones that `#include` it directly.
+Without this, `make` after a header-only change can link some translation units against the
+old layout and others against the new one -- same struct, different member offsets per
+`.o` -- which doesn't fail to build; it produces a binary that reads its own data at the
+wrong offsets and corrupts or crashes at runtime, far from the edit that caused it.
+
 ---
 
 ## 2. Error handling

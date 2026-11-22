@@ -79,7 +79,7 @@ below.
 | Variables, parameters, struct fields | `snake_case` | `patch_count`, `strip_level`, `base_source` |
 | Struct and enum types | `snake_case`, module prefix, typedef'd to the same name | `typedef struct inst_patch inst_patch;` |
 | Enum values | `UPPER_SNAKE_CASE` with the type's prefix | `STACK_APPLIED`, `STACK_DISABLED`, `STACK_CONFLICT` |
-| Macros | `UPPER_SNAKE_CASE`, `NHP_` prefix if public | `NHP_VERSION`, `NHP_ARRAY_LEN(a)` |
+| Macros | `UPPER_SNAKE_CASE`, `NHP_` prefix if public | `NHPM_VERSION`, `NHP_ARRAY_LEN(a)` |
 | Compile-time constants | `enum` value or macro, `UPPER_SNAKE_CASE` | `NHP_DEFAULT_DELAY_MS`, `INDEX_MAX_AGE_DAYS` |
 | `const` objects (tables, strings) | `static const`, `snake_case` | `static const char *const default_ignore_patterns[]` |
 | Callback types | `snake_case` ending in `_fn` | `net_progress_fn`, `proc_line_fn` |
@@ -295,7 +295,7 @@ through globals.
 |---|---|
 | `.clang-format` | formatting rules from 6.2 |
 | `.clang-tidy` | `bugprone-*`, `cert-*`, `clang-analyzer-*`, `misc-*`, `readability-identifier-naming` (enforces 6.3), `readability-function-size`; noisy checks turned off explicitly |
-| `.editorconfig` | spaces, LF, final newline, tabs only in Makefiles, for editors |
+| `.editorconfig` | spaces, LF, final newline, tabs only in Makefiles, 2-space indent for YAML, for editors |
 | `make format` | runs `clang-format -i` on all sources |
 | `make lint` | `clang-format --dry-run --Werror`, `clang-tidy`, `cppcheck`, banned-function grep |
 | CI | runs `make lint`, builds with `-Werror` on GCC and Clang, runs all tests under sanitizers |
@@ -329,4 +329,150 @@ AlignConsecutiveMacros: Consecutive
 - New behavior comes with tests; bug fixes come with a test that failed before the fix.
 - `CHANGELOG.md` gets a line for every user-visible change.
 
+The sections below cover every other file type actually tracked in the repo. Captured
+test data under `tests/fixtures/` (`.html` site snapshots, `.diff` patches, the `.tar.gz`
+and the fake NetHack `source*/` trees) is deliberately exempt: it represents *other*
+systems' output (a website, a patch author, upstream NetHack), not nhpm's own code, so
+holding it to nhpm's conventions would defeat its purpose as a fixture.
+
 ---
+
+## 7. Shell scripts
+
+The only shell script in the repo proper is `tests/run.sh`; keep any new one this small and
+this plain.
+
+- `#!/bin/sh`, and POSIX-only syntax -- no bash arrays, `[[ ]]`, or other bashisms. These are
+  thin wrappers, not programs; they stay portable to `dash`.
+- `set -eu` as the first line after the shebang/header comment, so a failing command or an
+  unset variable stops the script instead of continuing on bad state.
+- Same file-header comment as C (6.4): a one-line summary of what the script does and why it
+  exists, right after the shebang.
+- Same 3-line comment cap as 6.10: a `#` comment longer than that moves its reasoning to
+  docs/ and leaves a pointer behind.
+- Quote every expansion (`"$var"`, `"$@"`); unquoted expansions are the classic source of
+  word-splitting and glob bugs.
+- Formatting otherwise follows `.editorconfig`'s defaults: 4-space indentation, no tabs, LF,
+  final newline.
+- A script is a wrapper around `make` or another already-correct command, not a place to
+  reimplement logic that belongs in `Makefile` or `src/`:
+
+  ```sh
+  #!/bin/sh
+  # run.sh - builds and runs the test suite. A thin wrapper around `make test`
+  # so the tests can be run directly, e.g. from CI or an editor, without
+  # remembering the make target's name.
+  set -eu
+  cd "$(dirname "$0")/.."
+  exec make test
+  ```
+
+---
+
+## 8. Python scripts
+
+Dev tooling under `scripts/` (currently `find_long_comments.py`) is Python, not shell, when
+the logic is easier to express that way (parsing, not just chaining commands).
+
+- Python 3, **standard library only** -- no third-party dependencies and no
+  `requirements.txt`, so a script runs on any machine with `python3` and nothing else
+  installed.
+- PEP 8: 4-space indentation, `snake_case` functions, a module-level docstring with a
+  `Usage:` line.
+- A one-line docstring on any function whose purpose isn't obvious from its name; no
+  docstring at all is also fine for a short, obviously-named helper.
+- `if __name__ == "__main__": sys.exit(main())`, so the script is directly runnable and
+  returns a real exit status for shell/CI callers.
+- No stray `print()` debugging left in; the only output is the tool's actual job (e.g. the
+  comments `find_long_comments.py` found), so it composes cleanly in a pipeline or `make`
+  target.
+- No formatter or linter is wired up for these yet (`make lint` only covers `src/`/`tests/`
+  C code); match the existing script's style by eye until one is added.
+- Same 3-line cap as 6.10 on an inline `#` comment (a docstring is not a comment and isn't
+  bound by this -- it can run as long as it needs to).
+
+---
+
+## 9. Makefiles
+
+Covers the top-level `Makefile`; `tests/fixtures/source/Makefile` is fixture data and this
+section doesn't apply to it (see the note above).
+
+- Tabs for recipe lines, spaces everywhere else -- required by `make` itself, and the only
+  exception `.editorconfig`'s `[Makefile]` section carves out from its normal spaces-only
+  rule.
+- Variables a caller might reasonably override (`CC`, `PREFIX`, `DESTDIR`, `VERSION`,
+  `CFLAGS`) use `?=`/`override ... +=`, never a bare `=`, so `make CC=clang` or
+  `make VERSION=v1.2.3` works without editing the file.
+- Internal, derived variables (`PKG_CFLAGS`, `OBJ`, `SRC`) use `:=` (immediate expansion),
+  not `=`, so a `$(shell ...)` call runs once at parse time, not once per reference.
+- Source lists come from `$(wildcard src/*.c src/ui/*.c)` and pattern rules
+  (`$(OBJDIR)/%.o: src/%.c`), not hand-maintained file lists, so adding a new `.c` file never
+  needs a Makefile edit.
+- Every target that doesn't produce a file of its own name is listed in `.PHONY`
+  (`test format lint install clean ci`, ...).
+- Comments explain *why*, same rule as 6.10, including the 3-line cap -- the Makefile's own
+  notes on why `-MMD -MP` matters or why `VERSION` falls back to `git describe` point at
+  docs/nhpm-plan.md rather than spelling the reason out in full. A recipe step whose purpose
+  isn't obvious from the command itself gets one.
+- Long recipes split across lines with a trailing `\` and `;` between shell statements on the
+  continued line (see the `ci:` target), since each recipe line is its own shell invocation.
+
+---
+
+## 10. GitHub Actions workflows (YAML)
+
+Covers `.github/workflows/*.yml` (`ci.yml`, `release.yml`).
+
+- 2-space indentation, never tabs -- the YAML convention, enforced by `.editorconfig`'s
+  `[*.{yml,yaml}]` section.
+- Job and step `id`s (the keys under `jobs:`) are `kebab-case` (`build-and-test`); a step's
+  `name:` is a short sentence in sentence case describing the action ("Install dependencies",
+  "Test"), matching the log output someone actually reads in the Actions UI.
+- Third-party actions are pinned to a major-version tag (`actions/checkout@v4`), not a
+  branch or an unpinned `@main`.
+- A multi-command step uses `run: |` with one command per line, same shape as a shell
+  script's body, rather than chaining with `&&` on one line.
+- Only the permissions a workflow actually needs are granted, declared explicitly with a
+  `permissions:` block (e.g. `contents: write` to upload a release asset) instead of relying
+  on the repository's default token scope.
+- Secrets and tokens are only ever referenced through `${{ secrets.* }}` or
+  `${{ github.token }}`, never hardcoded.
+- Comments explain *why* a non-obvious choice was made, with the same 3-line cap as 6.10 --
+  e.g. why `release.yml` doesn't build a native Windows binary gets a short pointer to
+  docs/tools-libraries.md rather than the full reasoning inline.
+
+---
+
+## 11. Markdown documentation
+
+Covers `README.md`, `CONTRIBUTING.md`, and everything under `docs/`.
+
+- Every `docs/*.md` file keeps the structure set by the original split of `nhpm-plan.md`: an
+  `# nhpm: <Topic>` title, a short intro paragraph linking back to
+  [nhpm-plan.md](nhpm-plan.md) and any sibling doc it depends on, then the numbered sections
+  carried over from that original single document (`## N. Topic`, `### N.M Subtopic`). A
+  doc's sections are **never renumbered from 1**: other docs and commit messages
+  cross-reference the absolute number (`docs/style.md section 6.3`), so renumbering silently
+  breaks every reference to it.
+- A `---` rule separates the intro from the first section, and separates each top-level
+  `## N.` section from the next, within the same file (see how `features.md` or
+  `nhpm-plan.md` break up their several sections). A doc with only one top-level section
+  (`security.md`, `testing.md`, this file before section 7) typically still closes with a
+  trailing `---` after it; a doc with several sections usually doesn't add one after the
+  last, since there's nothing left to separate it from.
+- `README.md` and `CONTRIBUTING.md` are entry points, not part of that numbering: plain `##`
+  headings, no section numbers.
+- Tables for structured, scannable reference info (dependency lists, naming rules, platform
+  notes); prose only for what a table would flatten.
+- A fenced block carries a language tag (` ```c `, ` ```sh `, ` ```make `, ` ```yaml `) when
+  it holds real code in that language, so it highlights correctly. A block that isn't code in
+  any language -- an ASCII diagram, a directory tree, a sample data dump -- stays a bare
+  ` ``` ` fence; tagging it `text` to satisfy a linter would be noise, not a fix.
+- Links between docs are relative (`[features.md](features.md)`), never an absolute path or
+  a URL back into this repo.
+- Inline code spans for every identifier, filename and command (`` `nhp_err` ``,
+  `` `make test` ``), same as a C doc comment would.
+- One blank line between elements (a heading, a paragraph, a list, a `---` rule).
+- `.editorconfig` turns off trailing-whitespace trimming for `*.md` specifically: a line
+  ending in two spaces is a deliberate Markdown hard line break, not something to clean up.

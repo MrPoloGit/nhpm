@@ -208,7 +208,7 @@ static void test_header_deterministic(void)
     CHECK(strstr(a, "Version:   1.0\n") != NULL);
     CHECK(strstr(a, "Author:    someone\n") != NULL);
     CHECK(strstr(a, "NetHack:   3.6.7\n") != NULL);
-    CHECK(strstr(a, "Created:   2026-11-15T21:40:12Z by nhpm 0.1\n") != NULL);
+    CHECK(strstr(a, "Created:   2026-11-15T21:40:12Z by nhpm " NHPM_VERSION "\n") != NULL);
     CHECK(strstr(a, "Apply:     patch -p1 < my-fix-1.0.diff\n") != NULL);
     CHECK(strstr(a, "a short description") != NULL);
     CHECK(strstr(a, "a longer one") != NULL);

@@ -113,3 +113,12 @@ sometimes needs tooling (older `make`, specific warnings suppressed) that today'
 `cc` on your distribution has dropped support for. If an instance's `build` fails for reasons
 that look toolchain-related rather than patch-related, check the recipe
 ([features.md](features.md), section 10.6) before assuming nhpm itself is at fault.
+
+### Windows: no native build, by design
+
+[nhpm-plan.md](nhpm-plan.md) section 7 scopes platform support to Linux and macOS first,
+with Windows only via WSL -- `ncursesw`/`panelw` and `quilt` aren't standard there, so
+`.github/workflows/release.yml` doesn't attempt a native `.exe`. Building inside WSL on a
+`windows-latest` runner wouldn't change that: it would just produce the same Linux ELF
+binary the Ubuntu job already makes, runnable only under WSL anyway. A native build is
+possible later via MSYS2/mingw-w64, which packages all of the above, if there's real demand.
