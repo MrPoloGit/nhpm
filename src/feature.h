@@ -3,9 +3,10 @@
 #ifndef NHPM_FEATURE_H
 #define NHPM_FEATURE_H
 
-/* POSIX.1-2008 / XSI, defined before any system header is pulled in. Also
- * enables the wide-character ncurses functions (add_wch, mvaddwstr,
- * get_wch); see docs/style.md section 6.1. */
+/* POSIX.1-2008 / XSI, defined before any system header is pulled in (docs/style.md 6.1).
+ * undef first: some libraries' own pkg-config --cflags (libxml2 on Ubuntu) pass a lower
+ * _XOPEN_SOURCE on the command line, which would otherwise trip -Wmacro-redefined. */
+#undef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 700
 
 /* On macOS, _XOPEN_SOURCE alone hides BSD/Darwin extensions we still need
