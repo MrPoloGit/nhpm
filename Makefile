@@ -1,86 +1,44 @@
 CC      ?= cc
 PREFIX  ?= /usr/local
 DESTDIR ?=
+CFLAGS  ?= -O2
+BUILD_DIR := build
 
 # What `nhpm --version` reports: the release tag in CI (release.yml passes
 # VERSION=), else the nearest git tag/commit, else plain "0.1" outside a
-# git checkout.
+# git checkout. Passed through to CMakeLists.txt, which has the same fallback.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null)
 ifeq ($(strip $(VERSION)),)
 VERSION := 0.1
 endif
 
-# Homebrew's ncurses is keg-only; panelw.pc isn't on the default pkg-config
-# path (docs/tools-libraries.md section 3), so add it when present. Passed
-# inline, not "export"ed, since $(shell ...) below may not see that.
-BREW_NCURSES_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix ncurses 2>/dev/null)
-ifneq ($(strip $(BREW_NCURSES_PREFIX)),)
-PKG_CONFIG_PATH_EXTRA := $(BREW_NCURSES_PREFIX)/lib/pkgconfig
-endif
+# Flags, pkg-config lookup and source list live in CMakeLists.txt (docs/style.md
+# section 11); CFLAGS/LDLIBS here are just extra flags layered on top. Recursive
+# (`=`): `debug` below overrides CFLAGS/LDLIBS/BUILD_DIR per-target.
+CMAKE_CONFIGURE = cmake -S . -B $(BUILD_DIR) -DCMAKE_C_COMPILER="$(CC)" \
+	-DCMAKE_C_FLAGS="$(CFLAGS)" -DCMAKE_EXE_LINKER_FLAGS="$(LDLIBS)" -DVERSION="$(VERSION)"
 
-# M1 adds libcurl/libxml-2.0, M7 adds ncursesw/panelw; linking against all
-# of them now matches the project's final shape (docs/nhpm-plan.md section 1)
-# instead of rewriting this file milestone by milestone.
-PKGS       := ncursesw panelw libcurl libxml-2.0
-PKG_CONFIG := PKG_CONFIG_PATH="$(PKG_CONFIG_PATH_EXTRA):$$PKG_CONFIG_PATH" pkg-config
-PKG_CFLAGS := $(shell $(PKG_CONFIG) --cflags $(PKGS) 2>/dev/null)
-PKG_LIBS   := $(shell $(PKG_CONFIG) --libs $(PKGS) 2>/dev/null)
-ifeq ($(strip $(PKG_LIBS)),)
-PKG_LIBS := -lncursesw -lpanelw -lcurl -lxml2
-endif
+nhpm:
+	$(CMAKE_CONFIGURE)
+	cmake --build $(BUILD_DIR) --target nhpm
 
-WARN := -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -Wmissing-prototypes \
-        -Wformat=2 -Wundef -Wcast-qual -Wwrite-strings -Wnull-dereference -Wdouble-promotion
-
-CFLAGS  ?= -O2
-# -MMD -MP: per-.o header dependency tracking, so a header-only edit
-# rebuilds every .c that depends on it, not just direct #includes -- see
-# docs/nhpm-plan.md section 1 for why a stale .o here is dangerous.
-override CFLAGS += -std=c11 $(WARN) -Isrc $(PKG_CFLAGS) -MMD -MP -DNHPM_VERSION='"$(VERSION)"'
-override LDLIBS += $(PKG_LIBS)
-
-SRC      := $(wildcard src/*.c src/ui/*.c)
-MAIN_SRC := src/main.c
-LIB_SRC  := $(filter-out $(MAIN_SRC),$(SRC))
-
-OBJDIR  := build/obj
-OBJ     := $(patsubst src/%.c,$(OBJDIR)/%.o,$(SRC))
-LIB_OBJ := $(patsubst src/%.c,$(OBJDIR)/%.o,$(LIB_SRC))
-
-nhpm: $(OBJ)
-	$(CC) $(CFLAGS) -o $@ $(OBJ) $(LDLIBS)
-
-$(OBJDIR)/%.o: src/%.c
-	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c -o $@ $<
-
--include $(wildcard build/obj/*.d build/obj-debug/*.d)
-
+debug: BUILD_DIR := build/debug
 debug: CFLAGS += -O0 -g -fsanitize=address,undefined
 debug: LDLIBS += -fsanitize=address,undefined
-debug: OBJDIR := build/obj-debug
 debug: nhpm
 
-TEST_SRC  := $(wildcard tests/test_*.c)
-TEST_BINS := $(patsubst tests/%.c,build/tests/%,$(TEST_SRC))
+test:
+	$(CMAKE_CONFIGURE)
+	cmake --build $(BUILD_DIR) --target nhpm_tests
+	ctest --test-dir $(BUILD_DIR) --output-on-failure
 
-test: $(TEST_BINS)
-	@status=0; \
-	for t in $(TEST_BINS); do \
-		echo "== $$t =="; \
-		$$t || status=1; \
-	done; \
-	exit $$status
-
-build/tests/%: tests/%.c $(LIB_OBJ)
-	@mkdir -p build/tests
-	$(CC) $(CFLAGS) -o $@ $< $(LIB_OBJ) $(LDLIBS)
+SRC := $(wildcard src/*.c src/ui/*.c)
 
 FMT_FILES := $(wildcard src/*.c src/*.h src/ui/*.c src/ui/*.h tests/*.c tests/*.h)
 
-# tests/run.sh, Makefile itself, and every workflow -- the '#'-comment
-# half of the comment-length check below (docs/style.md 7/9/10).
-HASH_COMMENT_FILES := tests/run.sh Makefile $(wildcard .github/workflows/*.yml)
+# tests/run.sh, Makefile itself, CMakeLists.txt, and every workflow -- the
+# '#'-comment half of the comment-length check below (docs/style.md 7/8/9/11).
+HASH_COMMENT_FILES := tests/run.sh Makefile CMakeLists.txt $(wildcard .github/workflows/*.yml)
 COMMENT_MAX_LINES  := 3
 
 format:
@@ -89,7 +47,7 @@ format:
 BANNED := strcpy|strcat|sprintf|gets|strtok|atoi|atol|system|popen|tmpnam|mktemp
 
 comment-length-check:
-	@echo "== comment length (docs/style.md 6.10/7/9/10, max $(COMMENT_MAX_LINES) lines) =="
+	@echo "== comment length (docs/style.md 6.10/7/8/9/11, max $(COMMENT_MAX_LINES) lines) =="
 	@status=0; \
 	awk -v max=$(COMMENT_MAX_LINES) 'FNR==1{in_c=0} !in_c&&/^[ \t]*\/\*/{in_c=1;start=FNR} \
 		in_c&&/\*\//{span=FNR-start+1; if(span>max){printf "%s:%d: /* */ comment spans %d lines (max %d)\n",FILENAME,start,span,max; bad++}; in_c=0} \
@@ -111,7 +69,8 @@ lint: comment-length-check
 		{ echo "error: a banned function is used, see docs/style.md section 6.8"; exit 1; }
 	@if command -v clang-tidy >/dev/null 2>&1; then \
 		echo "== clang-tidy =="; \
-		clang-tidy $(SRC) -- $(CFLAGS); \
+		$(CMAKE_CONFIGURE) >/dev/null; \
+		clang-tidy $(SRC) -p $(BUILD_DIR); \
 	else \
 		echo "clang-tidy not found locally; it runs in CI"; \
 	fi
@@ -123,8 +82,7 @@ lint: comment-length-check
 	fi
 
 install: nhpm
-	install -Dm755 nhpm $(DESTDIR)$(PREFIX)/bin/nhpm
-	install -Dm644 doc/nhpm.1 $(DESTDIR)$(PREFIX)/share/man/man1/nhpm.1
+	DESTDIR="$(DESTDIR)" cmake --install $(BUILD_DIR) --prefix "$(PREFIX)"
 
 clean:
 	rm -rf build nhpm
@@ -159,4 +117,4 @@ ci:
 	done
 	@echo "ci: all checks passed ($(CI_CCS))"
 
-.PHONY: debug test format lint comment-length-check install clean ci
+.PHONY: nhpm debug test format lint comment-length-check install clean ci

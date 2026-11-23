@@ -58,7 +58,7 @@ Scripted through the command-line mode:
   characters, filtering).
 - A scripted smoke test running nhpm inside `tmux` (or a pty via `script`), sending keys
   and checking the captured screen text for expected content.
-- Manual checklist before each release: resize while scrolled, 80×24, `NO_COLOR`, monochrome
+- Manual checklist before each release: resize while scrolled, 80x24, `NO_COLOR`, monochrome
   `TERM=vt100`, Esc during refresh/build, editor round-trip, play and return, mouse clicks.
 
 ### 17.4 Real-world tests (manual, before release)

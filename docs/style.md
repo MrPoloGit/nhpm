@@ -373,25 +373,30 @@ this plain.
 ## 8. Makefiles
 
 Covers the top-level `Makefile`; `tests/fixtures/source/Makefile` is fixture data and this
-section doesn't apply to it (see the note above).
+section doesn't apply to it (see the note above). It stays the single command people and CI
+run (`make`, `make test`, ...), but for everything except lint/format/the comment-length
+check it's a thin wrapper that shells out to `CMakeLists.txt` (section 11), which owns the
+actual compiler flags, dependency lookup and source list.
 
 - Tabs for recipe lines, spaces everywhere else -- required by `make` itself, and the only
   exception `.editorconfig`'s `[Makefile]` section carves out from its normal spaces-only
   rule.
 - Variables a caller might reasonably override (`CC`, `PREFIX`, `DESTDIR`, `VERSION`,
-  `CFLAGS`) use `?=`/`override ... +=`, never a bare `=`, so `make CC=clang` or
-  `make VERSION=v1.2.3` works without editing the file.
-- Internal, derived variables (`PKG_CFLAGS`, `OBJ`, `SRC`) use `:=` (immediate expansion),
-  not `=`, so a `$(shell ...)` call runs once at parse time, not once per reference.
-- Source lists come from `$(wildcard src/*.c src/ui/*.c)` and pattern rules
-  (`$(OBJDIR)/%.o: src/%.c`), not hand-maintained file lists, so adding a new `.c` file never
-  needs a Makefile edit.
+  `CFLAGS`) use `?=`, never a bare `=`, so `make CC=clang` or `make VERSION=v1.2.3` works
+  without editing the file; a target like `debug` that needs its own value layers more on
+  with a target-specific `+=` (`debug: CFLAGS += ...`) rather than changing the default.
+- Internal, derived variables (`SRC`, `FMT_FILES`, `CI_CCS`) use `:=` (immediate expansion),
+  not `=`, so a `$(shell ...)` or `$(wildcard ...)` call runs once at parse time, not once
+  per reference. `CMAKE_CONFIGURE` is the one exception: it's `=` (recursive) on purpose, so
+  it re-expands against whatever `CFLAGS`/`LDLIBS`/`BUILD_DIR` a target overrides.
+- `SRC`/`FMT_FILES` (for clang-tidy/cppcheck/clang-format/the comment-length check) come from
+  `$(wildcard ...)`, not a hand-maintained list, same reasoning as CMakeLists.txt's own
+  `file(GLOB ...)` for the actual build (section 11) -- a new `.c` file needs neither edited.
 - Every target that doesn't produce a file of its own name is listed in `.PHONY`
-  (`test format lint install clean ci`, ...).
-- Comments explain *why*, same rule as 6.10, including the 3-line cap -- the Makefile's own
-  notes on why `-MMD -MP` matters or why `VERSION` falls back to `git describe` point at
-  docs/nhpm-plan.md rather than spelling the reason out in full. A recipe step whose purpose
-  isn't obvious from the command itself gets one.
+  (`nhpm test debug format lint install clean ci`, ...).
+- Comments explain *why*, same rule as 6.10, including the 3-line cap -- e.g. why `VERSION`
+  falls back to `git describe`, or why `CMAKE_CONFIGURE` has to be recursive, points at the
+  reason briefly rather than spelling it out in full.
 - Long recipes split across lines with a trailing `\` and `;` between shell statements on the
   continued line (see the `ci:` target), since each recipe line is its own shell invocation.
 
@@ -453,3 +458,35 @@ Covers `README.md`, `CONTRIBUTING.md`, and everything under `docs/`.
 - One blank line between elements (a heading, a paragraph, a list, a `---` rule).
 - `.editorconfig` turns off trailing-whitespace trimming for `*.md` specifically: a line
   ending in two spaces is a deliberate Markdown hard line break, not something to clean up.
+
+---
+
+## 11. CMakeLists.txt
+
+Covers the top-level `CMakeLists.txt`. It, not the Makefile, is the one place the actual
+compiler flags, `pkg-config` dependency lookup and source list are decided; the Makefile
+(section 8) shells out to it for `nhpm`/`test`/`debug`/`install`/`clean`, passing its own
+`CC`/`CFLAGS`/`LDLIBS`/`VERSION` through as `-D` arguments, and stays the one command people
+and CI actually run. `make lint`/`make format`/`make comment-length-check` are the exception:
+they're plain text-processing tools with no CMake equivalent, so they stay Makefile-only.
+
+- 4-space indentation, never tabs, matching `.editorconfig`'s default -- there's no
+  CMake-specific override, unlike the `[Makefile]` tab exception behind section 8.
+- Lowercase command names (`add_executable`, `target_link_libraries`), the de-facto CMake
+  convention. `UPPER_CASE` only for variables, the same split as 6.3's macros/constants:
+  built-in CMake variables (`CMAKE_*`) and cache variables a caller might set on the command
+  line (`VERSION`) are `UPPER_CASE`; target names are `lower_snake_case` (`nhpm`, `nhpm_core`,
+  `nhpm_deps`, `nhpm_tests`), matching the rest of the project's naming (6.3).
+- Variables a caller might reasonably override (`VERSION`, `CMAKE_C_FLAGS`,
+  `CMAKE_EXE_LINKER_FLAGS`) are plain variables, never hardcoded, so
+  `cmake -B build -DVERSION=v1.2.3` works without editing the file -- the CMake equivalent of
+  a Makefile's `?=` (8). There's no sanitizer-specific option: `make debug` and CI's
+  ASan/UBSan pass just set `CMAKE_C_FLAGS`/`CMAKE_EXE_LINKER_FLAGS` directly, the same way any
+  other extra flag would be set, rather than adding a second way to ask for the same thing.
+- Source lists come from `file(GLOB ... CONFIGURE_DEPENDS src/*.c src/ui/*.c)`, not a
+  hand-maintained list, so a new `.c` file never needs a build file edited (the Makefile's own
+  `SRC`/`FMT_FILES` wildcards, section 8, are separate and only feed the lint tools).
+- Comments explain *why*, same rule and 3-line cap as 6.10 -- `make comment-length-check`
+  treats `CMakeLists.txt`'s `#` comments the same as the Makefile's own.
+- `CMAKE_EXPORT_COMPILE_COMMANDS ON` so `make lint`'s clang-tidy step can load exact per-file
+  flags with `-p` instead of guessing a single flag set for every file.

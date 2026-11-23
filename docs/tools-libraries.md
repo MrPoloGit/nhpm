@@ -19,23 +19,24 @@ no `quilt` will compile a `nhpm` binary that can't manage a patch stack.
 | Dependency | Why |
 |---|---|
 | A C11 compiler | GCC or Clang |
+| **CMake** (3.16+) | the Makefile shells out to a top-level `CMakeLists.txt` for the actual build (docs/style.md section 11); `make` is still the only command you need to run |
 | **ncursesw** + **panel** (dev headers) | the terminal interface (wide-character build for UTF-8; panel library for stacked dialogs) |
 | libcurl (dev headers) | HTTPS downloads from the Patch Database |
 | libxml2 (dev headers) | HTML parsing with XPath |
-| pkg-config | the Makefile uses it to find the above |
+| pkg-config | CMakeLists.txt uses it to find the above |
 
 ```sh
 # macOS (Homebrew)
-brew install ncurses curl libxml2 pkg-config
+brew install cmake ncurses curl libxml2 pkg-config
 
 # Debian/Ubuntu
-sudo apt install build-essential libncurses-dev libcurl4-openssl-dev libxml2-dev pkg-config
+sudo apt install build-essential cmake libncurses-dev libcurl4-openssl-dev libxml2-dev pkg-config
 
 # Fedora/RHEL
-sudo dnf install gcc make ncurses-devel libcurl-devel libxml2-devel pkgconf-pkg-config
+sudo dnf install gcc make cmake ncurses-devel libcurl-devel libxml2-devel pkgconf-pkg-config
 
 # Arch
-sudo pacman -S base-devel ncurses curl libxml2 pkgconf
+sudo pacman -S base-devel cmake ncurses curl libxml2 pkgconf
 ```
 
 See [the Platform notes](#3-platform-notes) below for why macOS needs a bit more care here.

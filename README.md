@@ -16,14 +16,20 @@ the command-line mode and the ncurses interface (milestone M7) are functional --
 
 ## Building
 
-Needs a C11 compiler, `ncursesw`+`panel`, `libcurl`, `libxml2` (headers and libraries), plus
-`quilt`, `patch`, `make`, `tar`/`gzip`/`unzip`, `diff` and optionally `git` at runtime. See
+Needs a C11 compiler, CMake, `ncursesw`+`panel`, `libcurl`, `libxml2` (headers and
+libraries), plus `quilt`, `patch`, `make`, `tar`/`gzip`/`unzip`, `diff` and optionally `git`
+at runtime. See
 [docs/nhpm-plan.md section 1](docs/nhpm-plan.md#1-dependencies-and-build) for package names.
 
 ```sh
 make            # build ./nhpm
 make test       # run the unit/integration tests
 ```
+
+`make` shells out to the top-level `CMakeLists.txt` for the actual build (so `cmake`/`ctest`
+need to be on `PATH`, alongside everything else above); `make`/`make lint` stays what CI runs
+and what you should run too -- see CONTRIBUTING.md. Calling `cmake`/`ctest` directly also
+works, for IDEs or other generators.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the rest of the development workflow (formatting,
 linting, the debug/sanitizer build) and a short version of the code style rules.

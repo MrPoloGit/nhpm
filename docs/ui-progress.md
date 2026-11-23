@@ -46,8 +46,6 @@ planned to working, move it here instead of leaving the gap implicit.
       unchanged (Force is CLI-only)
 - [ ] Progress widget distinct from plain status-line text (current refresh/download progress
       is functional but not the spec's dedicated widget)
-- [ ] No click handling yet. Mouse mode (`mousemask()`) is off for now, since turning it on
-      would cost the terminal's own text selection for no benefit until this is built
 - [x] `s`/`S` sort-column toggle on Database and Library (cycles Name/Author/For/Rating and
       Name/Version/For; `S` reverses; selection follows its entry across a resort). Patches
       keeps stack order (J/K move); the other screens have too few rows to bother
@@ -266,3 +264,17 @@ or `m` on Library
 - Verification so far has been: build/lint/test green after each change, plus the user
   exercising each screen live and reporting back (per their own request -- the UI is not
   self-tested via tmux in this project going forward).
+
+## Issues
+
+- search feature on database isnt working
+- search for patches page too
+- search for Sources
+- how to create an instance, select patches from the library, and then building
+- add search to Instances page
+- in the build page will I be able to scroll up and down? and add a button to export build log
+- let me scroll the Help page stuff, like Database has
+- make sure that library, patches, and sources all become scrollable with enough content or if the window is small enough, whatever like database has
+
+- next message
+- look at docs/features.md and docs/ui-progress.md, add the ability to export build log file, building isn't working for 3.4.3 and 3.6.7, I choose base source of 3.4.3, but i need a nethack build recipe that works, here are the options nethack-3.4-unix, nethack-3.6-linux, nethack-3.7-linux, i choose nethack-3.4-unix, and i got an error 

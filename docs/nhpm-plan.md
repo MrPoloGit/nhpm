@@ -61,6 +61,11 @@ if not.
 
 ### Build system
 
+This sketch shows the shape of the logic rather than literal file contents: the actual
+Makefile now shells out to a top-level `CMakeLists.txt` for everything but `test`/`format`/
+`lint` (docs/style.md sections 8 and 11), which is where `SRC`/`OBJ`/`pkg-config` etc. below
+actually live today.
+
 ```make
 PKGS    = ncursesw panelw libcurl libxml-2.0
 WARN    = -Wall -Wextra -Wpedantic -Wshadow -Wstrict-prototypes -Wmissing-prototypes \

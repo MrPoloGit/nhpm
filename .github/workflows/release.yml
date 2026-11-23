@@ -30,12 +30,12 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libncursesw5-dev libcurl4-openssl-dev libxml2-dev pkg-config \
+            cmake libncursesw5-dev libcurl4-openssl-dev libxml2-dev pkg-config \
             quilt patch diffutils tar gzip unzip git
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install ncurses curl libxml2 pkg-config quilt
+        run: brew install cmake ncurses curl libxml2 pkg-config quilt
 
       - name: Build
         run: make VERSION="${GITHUB_REF_NAME}" CFLAGS="-O2 -Werror"
