@@ -104,15 +104,23 @@ static void real_sha256_of(const char *path, char out_hex[65])
     }
 }
 
-/* A cheap deterministic "hash" of every file under `dir` (size plus a
- * running byte sum), good enough to catch any change at all. Used to
- * confirm a rolled-back conflict left everything exactly as it was. */
+static int compare_names(const void *a, const void *b)
+{
+    const char *const *pa = a;
+    const char *const *pb = b;
+    return strcmp(*pa, *pb);
+}
+
+/* A cheap deterministic "hash" of every file under `dir`. Entries are
+ * sorted before combining -- readdir() order isn't stable across an
+ * unlink+recreate (quilt restoring a file on pop), even unchanged. */
 static unsigned long tree_fingerprint(const char *dir)
 {
-    unsigned long sum = 0;
+    char **names = NULL;
+    size_t count = 0;
     DIR *dp = opendir(dir);
     if (dp == NULL) {
-        return sum;
+        return 0;
     }
     struct dirent *entry;
     while ((entry = readdir(dp)) != NULL) {
@@ -120,7 +128,23 @@ static unsigned long tree_fingerprint(const char *dir)
             str_eq(entry->d_name, ".pc")) {
             continue;
         }
-        char *child = path_join(dir, entry->d_name);
+        char **grown = realloc(names, (count + 1) * sizeof(*grown));
+        if (grown == NULL) {
+            break;
+        }
+        names = grown;
+        names[count] = str_dup(entry->d_name);
+        if (names[count] != NULL) {
+            count++;
+        }
+    }
+    (void)closedir(dp);
+
+    qsort(names, count, sizeof(*names), compare_names);
+
+    unsigned long sum = 0;
+    for (size_t i = 0; i < count; i++) {
+        char *child = path_join(dir, names[i]);
         struct stat st;
         if (child != NULL && stat(child, &st) == 0) {
             if (S_ISDIR(st.st_mode)) {
@@ -129,16 +153,17 @@ static unsigned long tree_fingerprint(const char *dir)
                 char *data = NULL;
                 size_t len = 0;
                 if (fs_read_file(child, &data, &len) == NHP_OK) {
-                    for (size_t i = 0; i < len; i++) {
-                        sum = sum * 131 + (unsigned char)data[i];
+                    for (size_t j = 0; j < len; j++) {
+                        sum = sum * 131 + (unsigned char)data[j];
                     }
                     free(data);
                 }
             }
         }
         free(child);
+        free(names[i]);
     }
-    (void)closedir(dp);
+    free(names);
     return sum;
 }
 

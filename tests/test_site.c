@@ -149,9 +149,9 @@ static void test_browse_url(void)
     char *u1 = site_browse_url(1);
     char *u2 = site_browse_url(2);
     char *u17 = site_browse_url(17);
-    CHECK(strcmp(u1, "https://nhpmdb.alt.org/?browse") == 0);
-    CHECK(strcmp(u2, "https://nhpmdb.alt.org/?browse&page=1") == 0);
-    CHECK(strcmp(u17, "https://nhpmdb.alt.org/?browse&page=16") == 0);
+    CHECK(strcmp(u1, "https://nhpatchdb.alt.org/?browse") == 0);
+    CHECK(strcmp(u2, "https://nhpatchdb.alt.org/?browse&page=1") == 0);
+    CHECK(strcmp(u17, "https://nhpatchdb.alt.org/?browse&page=16") == 0);
     free(u1);
     free(u2);
     free(u17);
@@ -178,7 +178,7 @@ static void test_detail_hosted(void)
     CHECK(strstr(d.long_description, "complete rewrite") != NULL);
     CHECK(strchr(d.long_description, '\n') != NULL); /* <br> became \n */
     CHECK(d.download_hosted == true);
-    CHECK(str_eq(d.download_url, "https://nhpmdb.alt.org/?download=485"));
+    CHECK(str_eq(d.download_url, "https://nhpatchdb.alt.org/?download=485"));
     CHECK(str_eq(d.added, "December 22, 2016 22:52"));
     CHECK(d.changed == NULL);
 
@@ -217,8 +217,8 @@ static void test_detail_url_helpers(void)
 {
     char *detail = site_detail_url("485");
     char *download = site_download_url("485");
-    CHECK(strcmp(detail, "https://nhpmdb.alt.org/?485") == 0);
-    CHECK(strcmp(download, "https://nhpmdb.alt.org/?download=485") == 0);
+    CHECK(strcmp(detail, "https://nhpatchdb.alt.org/?485") == 0);
+    CHECK(strcmp(download, "https://nhpatchdb.alt.org/?download=485") == 0);
     free(detail);
     free(download);
 }

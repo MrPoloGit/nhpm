@@ -33,11 +33,9 @@ static inst_instance *g_instances = NULL;
 static size_t g_inst_count = 0;
 
 /* nhpm's search syntax (docs/features.md 13.10), persisted across
- * screens; g_editing/g_edit_buf back '/' composing live, filtering on
- * every keystroke. `lib:`/`in:` are pulled out first -- idx_query_parse() doesn't know them. */
+ * screens; do_search() below recomputes results live, on every
+ * keystroke. `lib:`/`in:` are pulled out first -- idx_query_parse() doesn't know them. */
 static char g_filter[256] = "";
-static char g_edit_buf[256] = "";
-static bool g_editing = false;
 
 /* Section 13.9's "s/S next sort column/reverse" -- cycles the sortable
  * columns (Mk doesn't count, it's a fixed glyph). NONE is first so the
@@ -282,7 +280,6 @@ static void enter(ui_app *app)
 {
     g_have_inst_version =
         app->active_loaded && ver_parse(app->active_inst.source, &g_inst_version) == NHP_OK;
-    app->text_input_active = g_editing; /* in case a previous visit left it mid-edit */
     free_instances();
     (void)inst_list(&g_instances, &g_inst_count);
     reload_index();
@@ -472,14 +469,6 @@ static void draw(ui_app *app)
     (void)wnoutrefresh(w);
 
     draw_details(app);
-
-    /* Search box lives in the status line, not a panel row (docs/features.md
-     * 13.6) -- it takes priority over the result-count message while
-     * open; Enter/Esc return the status line to normal on the next draw. */
-    if (g_editing) {
-        ui_set_status(app, "Search: %s_   (Enter to apply, Esc to clear)", g_edit_buf);
-        return;
-    }
 
     char state[96] = "";
     if (g_sort_col != DB_SORT_NONE) {
@@ -705,53 +694,37 @@ static void do_uninstall(ui_app *app)
     }
 }
 
+/* docs/features.md 13.9's "/": a floating popup box (ui_show_popup_input_live(),
+ * not the status line) that re-filters live on every keystroke; Esc clears
+ * the filter entirely rather than restoring whatever it was before. */
+static void on_search_change(ui_app *app, const char *text)
+{
+    (void)app;
+    (void)snprintf(g_filter, sizeof(g_filter), "%s", text);
+    recompute_results();
+}
+
+static void do_search(ui_app *app)
+{
+    char search_text[256];
+    (void)snprintf(search_text, sizeof(search_text), "%s", g_filter);
+    bool committed = ui_show_popup_input_live(app, "Search (v: a: r:>=N id: lib: in:)", search_text,
+                                              sizeof(search_text), draw, on_search_change);
+    if (!committed) {
+        g_filter[0] = '\0';
+    } else {
+        (void)snprintf(g_filter, sizeof(g_filter), "%s", search_text);
+    }
+    recompute_results();
+}
+
 static bool handle_key(ui_app *app, wint_t ch)
 {
     WINDOW *w = app->layout.main_win;
     int visible = (w != NULL) ? getmaxy(w) - 3 : 1;
 
-    if (g_editing) {
-        if (ch == L'\n' || ch == KEY_ENTER) {
-            (void)snprintf(g_filter, sizeof(g_filter), "%s", g_edit_buf);
-            g_editing = false;
-            app->text_input_active = false;
-            recompute_results();
-            return true;
-        }
-        if (ch == 27) { /* Esc: clear the filter entirely */
-            g_filter[0] = '\0';
-            g_edit_buf[0] = '\0';
-            g_editing = false;
-            app->text_input_active = false;
-            recompute_results();
-            return true;
-        }
-        if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
-            size_t len = strlen(g_edit_buf);
-            if (len > 0) {
-                g_edit_buf[len - 1] = '\0';
-            }
-            (void)snprintf(g_filter, sizeof(g_filter), "%s", g_edit_buf);
-            recompute_results();
-            return true;
-        }
-        if (ch >= 0x20 && ch < 0x7f) {
-            size_t len = strlen(g_edit_buf);
-            if (len + 1 < sizeof(g_edit_buf)) {
-                g_edit_buf[len] = (char)ch;
-                g_edit_buf[len + 1] = '\0';
-            }
-            (void)snprintf(g_filter, sizeof(g_filter), "%s", g_edit_buf);
-            recompute_results();
-            return true;
-        }
-        return true; /* editing: swallow everything else too */
-    }
-
     if (ch == L'/') {
-        (void)snprintf(g_edit_buf, sizeof(g_edit_buf), "%s", g_filter);
-        g_editing = true;
-        app->text_input_active = true;
+        do_search(app);
         return true;
     }
 

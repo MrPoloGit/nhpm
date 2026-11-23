@@ -179,6 +179,17 @@ static void draw_details(ui_app *app)
     (void)mvwaddnstr(w, 1, 1, text, inner_width);
     free(text);
 
+    if (str_eq(inst->recipe, "custom")) {
+        buf cmd_line;
+        buf_init(&cmd_line);
+        buf_append_fmt(&cmd_line, "custom_commands: %s",
+                       inst->custom_commands[0] != '\0' ? inst->custom_commands
+                                                        : "(none set -- press c)");
+        char *cmd_text = buf_take(&cmd_line);
+        (void)mvwaddnstr(w, 2, 1, cmd_text, inner_width);
+        free(cmd_text);
+    }
+
     (void)wnoutrefresh(w);
 }
 
@@ -271,11 +282,6 @@ static void do_build(ui_app *app)
     if (!ui_require_write_access(app)) {
         return;
     }
-    if (str_eq(app->active_inst.recipe, "custom")) {
-        ui_set_status(app, "custom recipes aren't runnable yet (editable recipes are UI/M7 "
-                           "scope, not built yet)");
-        return;
-    }
 
     free_lines();
     g_canceled = false;
@@ -296,6 +302,43 @@ static void do_build(ui_app *app)
         g_build_failed = true;
         (void)snprintf(g_build_error, sizeof(g_build_error), "%s", err_get());
         ui_set_status(app, "build failed: %s", err_get());
+    }
+}
+
+/* docs/features.md 10.6's custom_commands, editable here instead of only
+ * by hand-editing instance.conf: a ';'-separated command list, run in
+ * src/ in order, only when the recipe is "custom". */
+static void do_edit_commands(ui_app *app)
+{
+    if (!app->active_loaded) {
+        ui_set_status(app, "no active instance");
+        return;
+    }
+    if (!ui_require_write_access(app)) {
+        return;
+    }
+
+    char commands[1024];
+    (void)snprintf(commands, sizeof(commands), "%s", app->active_inst.custom_commands);
+    if (!ui_show_popup_input(app, "Custom commands (';'-separated, run in src/, $PREFIX allowed)",
+                             commands, sizeof(commands), draw)) {
+        ui_set_status(app, "cancelled");
+        return;
+    }
+
+    char *new_commands = str_dup(commands);
+    if (new_commands == NULL) {
+        ui_set_status(app, "out of memory");
+        return;
+    }
+    free(app->active_inst.custom_commands);
+    app->active_inst.custom_commands = new_commands;
+
+    nhp_err err = inst_save(&app->active_inst);
+    if (err == NHP_OK) {
+        ui_set_status(app, "saved custom_commands");
+    } else {
+        ui_set_status(app, "could not save custom_commands: %s", err_get());
     }
 }
 
@@ -363,13 +406,17 @@ static bool handle_key(ui_app *app, wint_t ch)
         do_jump_to_error(app);
         return true;
     }
+    if (ch == L'c') {
+        do_edit_commands(app);
+        return true;
+    }
     return false;
 }
 
 const ui_screen scr_build = {
     .name = "Build",
     .nav_letter = 'b',
-    .key_bar = "Tab/Left menu  b Build/rebuild  e Next error  Esc cancel  p Play",
+    .key_bar = "Tab/Left menu  b Build/rebuild  e Next error  c Edit commands  Esc cancel  p Play",
     .enter = enter,
     .leave = leave,
     .draw = draw,

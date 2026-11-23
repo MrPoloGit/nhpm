@@ -74,12 +74,6 @@ void ui_text_view_draw(const ui_text_view *view, WINDOW *win, int first_line, in
  * (height-2) rows by (width-2) columns, after calling this. */
 void ui_draw_panel(WINDOW *win, const char *title);
 
-/* A blocking single-line prompt in the status line (13.5); `redraw` runs
- * before every key so what's behind stays current. `out` is pre-filled for
- * editing; Enter commits (returns true), Esc leaves it untouched (false). */
-bool ui_prompt_line(ui_app *app, const char *prompt, char *out, size_t out_size,
-                    void (*redraw)(ui_app *app));
-
 /* A blocking y/N confirmation in the status line. 'y'/'Y' confirms;
  * anything else (including Enter and Esc) declines -- there's no key
  * that destroys something by accident. */
@@ -96,10 +90,17 @@ void ui_show_text_dialog(ui_app *app, const char *title, const char *text);
 bool ui_show_popup_menu(ui_app *app, const char *title, const char *const *options, size_t count,
                         size_t *out_index, void (*redraw)(ui_app *app));
 
-/* Like ui_prompt_line(), but in the floating panel-backed box from
- * ui_show_popup_menu() -- for free text (a name, path, git tag). Enter
- * commits (out holds the text, true); Esc leaves it untouched (false). */
+/* A floating, panel-backed text box (every text input in the UI uses this,
+ * not the status line) -- for free text (a name, path, git tag). `out` is
+ * pre-filled for editing; Enter commits (true); Esc leaves it untouched. */
 bool ui_show_popup_input(ui_app *app, const char *title, char *out, size_t out_size,
                          void (*redraw)(ui_app *app));
+
+/* Like ui_show_popup_input(), but also calls on_change(app, out) after
+ * every edit -- for a live filter box (docs/features.md 13.9) where the
+ * screen behind it re-filters as you type. */
+bool ui_show_popup_input_live(ui_app *app, const char *title, char *out, size_t out_size,
+                              void (*redraw)(ui_app *app),
+                              void (*on_change)(ui_app *app, const char *text));
 
 #endif /* NHPM_UI_WIDGETS_H */

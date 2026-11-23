@@ -4,6 +4,7 @@
 #include "screen.h"
 
 #include "library.h"
+#include "mkpatch.h"
 #include "proc.h"
 #include "stack.h"
 #include "version.h"
@@ -30,6 +31,55 @@ static bool g_have_inst_version = false;
 static char g_editing_id[128] = "";
 static char g_editing_name[160] = "";
 
+/* docs/features.md 11.7's "c": read-only dry-run results for every
+ * disabled patch, cached until the next check or any stack change
+ * (indices shift, so a stale cache would point at the wrong row). */
+static stack_check_result *g_check_results = NULL;
+static size_t g_check_count = 0;
+static bool g_checked = false;
+
+/* docs/features.md 11.9's shared-files flag, recomputed alongside
+ * g_check_results -- same "stale after a stack change" reasoning. */
+static stack_shared_file *g_shared_files = NULL;
+static size_t g_shared_count = 0;
+
+/* docs/features.md 13.9's "uncaptured changes" header indicator, from
+ * mkp_changes() -- recomputed, not kept live, since it's a filesystem
+ * comparison (12.3 steps 1-2), not a cheap flag. */
+static bool g_has_uncaptured = false;
+
+static void free_check_results(void)
+{
+    stack_check_result_free(g_check_results);
+    g_check_results = NULL;
+    g_check_count = 0;
+    g_checked = false;
+}
+
+/* Recomputes everything that goes stale after a stack change (enable,
+ * disable, move, add, remove, undo, or anything a capture/refresh can
+ * touch). Called after every ui_reload_active_instance() in this file. */
+static void refresh_caches(ui_app *app)
+{
+    free_check_results();
+    stack_shared_files_free(g_shared_files, g_shared_count);
+    g_shared_files = NULL;
+    g_shared_count = 0;
+    g_has_uncaptured = false;
+
+    if (!app->active_loaded) {
+        return;
+    }
+    (void)stack_find_shared_files(&app->active_inst, &g_shared_files, &g_shared_count);
+
+    mkp_file *files = NULL;
+    size_t count = 0;
+    if (mkp_changes(&app->active_inst, app->config.ignore, &files, &count) == NHP_OK) {
+        g_has_uncaptured = count > 0;
+    }
+    mkp_file_list_free(files, count);
+}
+
 static void enter(ui_app *app)
 {
     /* Reload from disk rather than trusting app->active_inst to already
@@ -44,6 +94,8 @@ static void enter(ui_app *app)
     }
     g_have_inst_version =
         app->active_loaded && ver_parse(app->active_inst.source, &g_inst_version) == NHP_OK;
+
+    refresh_caches(app);
 }
 
 // cppcheck-suppress constParameterCallback -- must match ui_screen.leave's signature
@@ -54,6 +106,11 @@ static void leave(ui_app *app)
         ver_free(&g_inst_version);
         g_have_inst_version = false;
     }
+    free_check_results();
+    stack_shared_files_free(g_shared_files, g_shared_count);
+    g_shared_files = NULL;
+    g_shared_count = 0;
+    g_has_uncaptured = false;
 }
 
 /* '~' fuzzy, '=' exact, '!' conflict, '?' unknown (docs/features.md
@@ -105,6 +162,38 @@ static void lookup_name_and_target(const char *id, char **out_name, char **out_t
     lib_patch_free(&lp);
 }
 
+/* docs/features.md 11.7's "c" dry-run results, as a Status-column word:
+ * "applied"/"disabled" from inst_patch itself, plus the dry-run outcome
+ * for a disabled patch once g_checked (NULL before "c" has run). */
+static const stack_check_result *find_check_result(size_t index)
+{
+    if (!g_checked) {
+        return NULL;
+    }
+    for (size_t i = 0; i < g_check_count; i++) {
+        if (g_check_results[i].index == index) {
+            return &g_check_results[i];
+        }
+    }
+    return NULL;
+}
+
+static void build_status_text(size_t index, const inst_patch *patch, char *out, size_t out_size)
+{
+    if (patch->enabled) {
+        (void)snprintf(out, out_size, "applied%s", patch->modified ? " (modified)" : "");
+        return;
+    }
+    const stack_check_result *r = find_check_result(index);
+    if (r == NULL) {
+        (void)snprintf(out, out_size, "disabled");
+    } else if (r->hunks_failed == 0) {
+        (void)snprintf(out, out_size, "disabled - clean");
+    } else {
+        (void)snprintf(out, out_size, "disabled - %d/%d fail", r->hunks_failed, r->hunks_total);
+    }
+}
+
 static void draw_row(WINDOW *win, int y, int width, size_t index, bool selected, void *user_data)
 {
     ui_app *app = user_data;
@@ -115,12 +204,14 @@ static void draw_row(WINDOW *win, int y, int width, size_t index, bool selected,
     lookup_name_and_target(patch->id, &name, &target);
     char mark = compat_mark(target);
 
+    char status_text[40];
+    build_status_text(index, patch, status_text, sizeof(status_text));
+
     buf line;
     buf_init(&line);
-    buf_append_fmt(&line, "  %2zu %-3s %-5s %-24.24s %-9.9s %-8s%s", index + 1,
+    buf_append_fmt(&line, "  %2zu %-3s %-5s %-24.24s %-9.9s %-8s %-20.20s", index + 1,
                    patch->enabled ? "on" : "off", patch->id, name != NULL ? name : "(unknown)",
-                   patch->version, target != NULL ? target : "",
-                   patch->modified ? "  (hand-fixed)" : "");
+                   patch->version, target != NULL ? target : "", status_text);
     char *text = buf_take(&line);
 
     bool colorize = !app->monochrome && !selected;
@@ -142,6 +233,37 @@ static void draw_row(WINDOW *win, int y, int width, size_t index, bool selected,
     free(text);
     free(name);
     free(target);
+}
+
+/* docs/features.md 11.9: which of `id`'s shared files (from g_shared_files)
+ * it's involved in, and which other enabled patches also touch each one.
+ * "" if none. */
+static void shared_files_summary(const char *id, char *out, size_t out_size)
+{
+    buf b;
+    buf_init(&b);
+    bool any = false;
+    for (size_t i = 0; i < g_shared_count; i++) {
+        const stack_shared_file *f = &g_shared_files[i];
+        bool touches = false;
+        for (size_t j = 0; j < f->patch_count && !touches; j++) {
+            touches = str_eq(f->patch_ids[j], id);
+        }
+        if (!touches) {
+            continue;
+        }
+        buf_append_fmt(&b, "%s%s (also:", any ? "; " : "shares ", f->path);
+        for (size_t j = 0; j < f->patch_count; j++) {
+            if (!str_eq(f->patch_ids[j], id)) {
+                buf_append_fmt(&b, " %s", f->patch_ids[j]);
+            }
+        }
+        buf_append_fmt(&b, ")");
+        any = true;
+    }
+    char *text = buf_take(&b);
+    (void)snprintf(out, out_size, "%s", (text != NULL) ? text : "");
+    free(text);
 }
 
 static void draw_details(ui_app *app)
@@ -166,6 +288,19 @@ static void draw_details(ui_app *app)
         char *text = buf_take(&line);
         (void)mvwaddnstr(w, 1, 1, text, inner_width);
         free(text);
+
+        char shared[200];
+        shared_files_summary(patch->id, shared, sizeof(shared));
+        if (shared[0] != '\0') {
+            bool colorize = !app->monochrome;
+            if (colorize) {
+                (void)wattron(w, COLOR_PAIR(UI_COLOR_WARN));
+            }
+            (void)mvwaddnstr(w, 2, 1, shared, inner_width);
+            if (colorize) {
+                (void)wattroff(w, COLOR_PAIR(UI_COLOR_WARN));
+            }
+        }
     }
     (void)wnoutrefresh(w);
 }
@@ -188,8 +323,23 @@ static void draw(ui_app *app)
         return;
     }
 
-    (void)mvwaddnstr(w, 1, 1, "Mk #  On  ID    Patch                    Version   For",
-                     inner_width);
+    static const char *const header_text = "Mk #  On  ID    Patch                    Version   For"
+                                           "      Status";
+    (void)mvwaddnstr(w, 1, 1, header_text, inner_width);
+    if (g_has_uncaptured) {
+        static const char *const marker = "* uncaptured changes";
+        int col = inner_width - (int)strlen(marker);
+        if (col > (int)strlen(header_text)) {
+            bool colorize = !app->monochrome;
+            if (colorize) {
+                (void)wattron(w, COLOR_PAIR(UI_COLOR_WARN));
+            }
+            (void)mvwaddnstr(w, 1, 1 + col, marker, (int)strlen(marker));
+            if (colorize) {
+                (void)wattroff(w, COLOR_PAIR(UI_COLOR_WARN));
+            }
+        }
+    }
     size_t count = app->active_inst.patch_count;
     int inner_height = getmaxy(w) - 2;
     ui_list_draw(&g_list, w, 2, inner_height - 1, inner_width, count, draw_row, app);
@@ -327,8 +477,8 @@ static nhp_err run_editor(const cfg_app *config, const char *path)
 static void do_open_editor(ui_app *app)
 {
     char rel_path[512] = "";
-    if (!ui_prompt_line(app, "File to edit (relative to the instance's source): ", rel_path,
-                        sizeof(rel_path), draw) ||
+    if (!ui_show_popup_input(app, "File to edit (relative to the instance's source): ", rel_path,
+                             sizeof(rel_path), draw) ||
         rel_path[0] == '\0') {
         ui_set_status(app, "cancelled");
         return;
@@ -366,7 +516,8 @@ static void do_open_editor(ui_app *app)
 static void do_new_patch(ui_app *app)
 {
     char name[160] = "";
-    if (!ui_prompt_line(app, "New patch name: ", name, sizeof(name), draw) || name[0] == '\0') {
+    if (!ui_show_popup_input(app, "New patch name: ", name, sizeof(name), draw) ||
+        name[0] == '\0') {
         ui_set_status(app, "cancelled");
         return;
     }
@@ -390,6 +541,7 @@ static void do_new_patch(ui_app *app)
     free(id);
 
     ui_reload_active_instance(app);
+    refresh_caches(app);
     g_list.selected = out_index;
     g_list.top = out_index;
     ui_set_status(app, "%s is on top -- edit files (o tracks new ones), then R to save it",
@@ -421,6 +573,7 @@ static void do_edit_begin(ui_app *app)
     (void)snprintf(g_editing_id, sizeof(g_editing_id), "%s", id);
     g_editing_name[0] = '\0';
     ui_reload_active_instance(app);
+    refresh_caches(app);
     ui_set_status(app, "%s is on top -- edit files (o tracks new ones), then R to save it",
                   g_editing_id);
 }
@@ -504,7 +657,69 @@ static void do_refresh(ui_app *app)
     g_editing_id[0] = '\0';
     g_editing_name[0] = '\0';
     ui_reload_active_instance(app);
+    refresh_caches(app);
     ui_set_status(app, "%s", status_msg);
+}
+
+/* docs/features.md 11.7's "c": dry-runs every disabled patch, read-only,
+ * and fills in the Status column (build_status_text() above) until the
+ * next stack change invalidates g_check_results. */
+static void do_check(ui_app *app)
+{
+    free_check_results();
+    nhp_err err = stack_check_disabled(&app->active_inst, &g_check_results, &g_check_count);
+    if (err != NHP_OK) {
+        ui_set_status(app, "could not check disabled patches: %s", err_get());
+        return;
+    }
+    g_checked = true;
+    if (g_check_count == 0) {
+        ui_set_status(app, "no disabled patches to check");
+    } else {
+        ui_set_status(app, "checked %zu disabled patch(es)", g_check_count);
+    }
+}
+
+/* docs/features.md 11.8's "t": a manual, labeled snapshot, same as
+ * Instances' own Snapshots dialog "a" -- Patches just offers it without
+ * leaving the screen. */
+static void do_snapshot(ui_app *app)
+{
+    char label[128] = "";
+    if (!ui_show_popup_input(app, "Snapshot label (blank for none): ", label, sizeof(label),
+                             draw)) {
+        ui_set_status(app, "cancelled");
+        return;
+    }
+    char *filename = NULL;
+    nhp_err err = inst_snapshot_create(app->active_inst.name, label, &filename);
+    if (err == NHP_OK) {
+        ui_set_status(app, "snapshot: %s", filename);
+    } else {
+        ui_set_status(app, "could not snapshot: %s", err_get());
+    }
+    free(filename);
+}
+
+/* docs/features.md 11.8's "u": restores the latest "auto-"-labeled
+ * snapshot taken before the last Enable/Disable/Move/Add/Remove. */
+static void do_undo(ui_app *app)
+{
+    stack_conflict conflict;
+    nhp_err err = stack_undo(&app->active_inst, &conflict);
+    if (err == NHP_OK) {
+        ui_reload_active_instance(app);
+        refresh_caches(app);
+        if (g_list.selected > 0 && g_list.selected >= app->active_inst.patch_count) {
+            g_list.selected = app->active_inst.patch_count - 1;
+        }
+        ui_set_status(app, "undid the last change");
+    } else if (err == NHP_ECONFLICT) {
+        ui_show_conflict(app, &conflict);
+        stack_conflict_free(&conflict);
+    } else {
+        ui_set_status(app, "could not undo: %s", err_get());
+    }
 }
 
 static bool handle_key(ui_app *app, wint_t ch)
@@ -562,6 +777,20 @@ static bool handle_key(ui_app *app, wint_t ch)
         }
         return true;
     }
+    if (ch == L'c') {
+        do_check(app);
+        return true;
+    }
+    if (ch == L't') {
+        do_snapshot(app);
+        return true;
+    }
+    if (ch == L'u') {
+        if (ui_require_write_access(app)) {
+            do_undo(app);
+        }
+        return true;
+    }
 
     if (count == 0) {
         return false;
@@ -579,6 +808,7 @@ static bool handle_key(ui_app *app, wint_t ch)
                                   : stack_enable(&app->active_inst, index, &conflict);
         if (err == NHP_OK) {
             ui_reload_active_instance(app);
+            refresh_caches(app);
             ui_set_status(app, "%s %s", was_enabled ? "disabled" : "enabled", id);
         } else if (err == NHP_ECONFLICT) {
             ui_show_conflict(app, &conflict);
@@ -596,6 +826,7 @@ static bool handle_key(ui_app *app, wint_t ch)
         nhp_err err = stack_move(&app->active_inst, index, index + 1, &conflict);
         if (err == NHP_OK) {
             ui_reload_active_instance(app);
+            refresh_caches(app);
             ui_list_move(&g_list, 1, count, visible);
             ui_set_status(app, "moved %s down", id);
         } else if (err == NHP_ECONFLICT) {
@@ -614,6 +845,7 @@ static bool handle_key(ui_app *app, wint_t ch)
         nhp_err err = stack_move(&app->active_inst, index, index - 1, &conflict);
         if (err == NHP_OK) {
             ui_reload_active_instance(app);
+            refresh_caches(app);
             ui_list_move(&g_list, -1, count, visible);
             ui_set_status(app, "moved %s up", id);
         } else if (err == NHP_ECONFLICT) {
@@ -627,6 +859,7 @@ static bool handle_key(ui_app *app, wint_t ch)
     if (ch == L'w') {
         ui_show_changes_dialog(app);
         ui_reload_active_instance(app);
+        refresh_caches(app);
         ui_list_init(&g_list);
         return true;
     }
@@ -650,6 +883,7 @@ static bool handle_key(ui_app *app, wint_t ch)
         nhp_err err = stack_remove(&app->active_inst, index, &conflict);
         if (err == NHP_OK) {
             ui_reload_active_instance(app);
+            refresh_caches(app);
             if (g_list.selected > 0 && g_list.selected >= app->active_inst.patch_count) {
                 g_list.selected--;
             }
@@ -669,7 +903,7 @@ const ui_screen scr_patches = {
     .name = "Patches",
     .nav_letter = 'p',
     .key_bar = "Tab/Left menu  Space toggle  J/K move  d Diff  w Capture changes  x remove  N new "
-               "patch  E edit  o open file  R refresh",
+               "patch  E edit  o open file  R refresh  c Check  t Snapshot  u Undo",
     .enter = enter,
     .leave = leave,
     .draw = draw,

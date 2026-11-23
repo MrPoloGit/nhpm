@@ -154,51 +154,6 @@ void ui_draw_panel(WINDOW *win, const char *title)
     }
 }
 
-bool ui_prompt_line(ui_app *app, const char *prompt, char *out, size_t out_size,
-                    void (*redraw)(ui_app *app))
-{
-    char edit[256];
-    (void)snprintf(edit, sizeof(edit), "%s", out);
-    app->text_input_active = true;
-
-    for (;;) {
-        if (redraw != NULL) {
-            redraw(app);
-        }
-        ui_set_status(app, "%s%s_", prompt, edit);
-        ui_flush_status(app);
-
-        wint_t ch = 0;
-        int r = wget_wch(stdscr, &ch);
-        if (r == KEY_CODE_YES && (ch == KEY_RESIZE || ch == KEY_MOUSE)) {
-            continue;
-        }
-        if (ch == L'\n' || ch == KEY_ENTER) {
-            (void)snprintf(out, out_size, "%s", edit);
-            app->text_input_active = false;
-            return true;
-        }
-        if (ch == 27) {
-            app->text_input_active = false;
-            return false;
-        }
-        if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
-            size_t len = strlen(edit);
-            if (len > 0) {
-                edit[len - 1] = '\0';
-            }
-            continue;
-        }
-        if (ch >= 0x20 && ch < 0x7f) {
-            size_t len = strlen(edit);
-            if (len + 1 < sizeof(edit)) {
-                edit[len] = (char)ch;
-                edit[len + 1] = '\0';
-            }
-        }
-    }
-}
-
 bool ui_confirm(ui_app *app, const char *message, void (*redraw)(ui_app *app))
 {
     app->text_input_active = true;
@@ -376,8 +331,8 @@ bool ui_show_popup_menu(ui_app *app, const char *title, const char *const *optio
     bool committed = false;
     app->text_input_active = true;
     for (;;) {
-        /* Drawn every loop, like ui_confirm()/ui_prompt_line(), so whatever's
-         * underneath stays current instead of a stale pre-popup frame. */
+        /* Drawn every loop, like ui_confirm()/popup_input_loop(), so
+         * whatever's underneath stays current instead of a stale frame. */
         if (redraw != NULL) {
             redraw(app);
         }
@@ -443,8 +398,12 @@ bool ui_show_popup_menu(ui_app *app, const char *title, const char *const *optio
     return committed;
 }
 
-bool ui_show_popup_input(ui_app *app, const char *title, char *out, size_t out_size,
-                         void (*redraw)(ui_app *app))
+/* Shared by ui_show_popup_input() and ui_show_popup_input_live() below;
+ * `on_change` (optional) runs after every edit, before Enter/Esc end the
+ * loop, so a live filter box can re-run its search on each keystroke. */
+static bool popup_input_loop(ui_app *app, const char *title, char *out, size_t out_size,
+                             void (*redraw)(ui_app *app),
+                             void (*on_change)(ui_app *app, const char *text))
 {
     char edit[256];
     (void)snprintf(edit, sizeof(edit), "%s", out);
@@ -506,7 +465,9 @@ bool ui_show_popup_input(ui_app *app, const char *title, char *out, size_t out_s
         char line[sizeof(edit) + 1];
         (void)snprintf(line, sizeof(line), "%s_", visible);
         (void)mvwaddnstr(win, 1, 1, line, inner_width);
-        (void)mvwaddnstr(win, 2, 1, "Enter confirm  Esc cancel", inner_width);
+        (void)mvwaddnstr(
+            win, 2, 1, (on_change != NULL) ? "Enter apply  Esc clear" : "Enter confirm  Esc cancel",
+            inner_width);
 
         (void)update_panels();
         (void)doupdate();
@@ -523,19 +484,23 @@ bool ui_show_popup_input(ui_app *app, const char *title, char *out, size_t out_s
         if (ch == 27) { /* Esc */
             break;
         }
+        bool changed = false;
         if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
             size_t len = strlen(edit);
             if (len > 0) {
                 edit[len - 1] = '\0';
+                changed = true;
             }
-            continue;
-        }
-        if (ch >= 0x20 && ch < 0x7f) {
+        } else if (ch >= 0x20 && ch < 0x7f) {
             size_t len = strlen(edit);
             if (len + 1 < sizeof(edit)) {
                 edit[len] = (char)ch;
                 edit[len + 1] = '\0';
+                changed = true;
             }
+        }
+        if (changed && on_change != NULL) {
+            on_change(app, edit);
         }
     }
     app->text_input_active = false;
@@ -552,4 +517,17 @@ bool ui_show_popup_input(ui_app *app, const char *title, char *out, size_t out_s
         (void)snprintf(out, out_size, "%s", edit);
     }
     return committed;
+}
+
+bool ui_show_popup_input(ui_app *app, const char *title, char *out, size_t out_size,
+                         void (*redraw)(ui_app *app))
+{
+    return popup_input_loop(app, title, out, out_size, redraw, NULL);
+}
+
+bool ui_show_popup_input_live(ui_app *app, const char *title, char *out, size_t out_size,
+                              void (*redraw)(ui_app *app),
+                              void (*on_change)(ui_app *app, const char *text))
+{
+    return popup_input_loop(app, title, out, out_size, redraw, on_change);
 }

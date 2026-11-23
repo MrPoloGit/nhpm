@@ -29,7 +29,7 @@ docs' sections), so cross-references between this document and the plan stay cor
 
 ### Goals
 
-- **Search and download** patches from the NetHack Patch Database (nhpmdb.alt.org).
+- **Search and download** patches from the NetHack Patch Database (nhpatchdb.alt.org).
 - **Keep a local library** of downloaded patches that you can search, including several
   versions of the same patch, and **delete versions** you no longer want.
 - **Keep untouched NetHack sources** for each version you use (3.4.3, 3.6.7, 3.7...).
@@ -168,7 +168,7 @@ the `Changed` date tells downloads apart.
 ### 7.4 Downloading a patch
 
 1. Read the Download link from the (cached) detail page.
-2. Hosted: `https://nhpmdb.alt.org/?download=ID`; external: use as-is.
+2. Hosted: `https://nhpatchdb.alt.org/?download=ID`; external: use as-is.
 3. On failure, if `wayback_fallback = yes`, try `https://web.archive.org/web/2id_/<url>`
    (`id_` returns the raw file). Record `via_wayback = yes`.
 4. **Check it's a diff** (unified, context or plain hunk headers). Reject HTML pages and
@@ -646,8 +646,8 @@ Apply:     cd nethack-3.6.7 && patch -p1 < 367-colorful-combined.diff
 
 Contains, in order:
   1. menucolors 1.5            (local)            sha256 81be...
-  2. Color Alchemy 1.2         (nhpmdb #498)   sha256 2c4d...
-  3. Dumplog (New) 1.0.0       (nhpmdb #485)   sha256 77a0...
+  2. Color Alchemy 1.2         (nhpatchdb #498)   sha256 2c4d...
+  3. Dumplog (New) 1.0.0       (nhpatchdb #485)   sha256 77a0...
 
 diff -Naur a/src/potion.c b/src/potion.c
 --- a/src/potion.c
@@ -1005,7 +1005,7 @@ The Snapshots dialog lists snapshots with date and label; **Enter** restores, **
    Dumplog (New)              1.0.0     3.6.0   -
    messagetype option         0.2       3.4.3   343-classic
  ────────────────────────────────────────────────────────────────────────
-  Downloaded 2026-11-14 from nhpmdb.alt.org   touches 4 files
+  Downloaded 2026-11-14 from nhpatchdb.alt.org   touches 4 files
  Enter view  a Add  x Del version  X Del patch  u Updates  i Import  m Make from folder
 ```
 

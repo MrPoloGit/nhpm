@@ -174,7 +174,7 @@ static void do_add_ignore_pattern(ui_app *app, mkp_file *files, bool *ticked, si
         (void)snprintf(pattern, sizeof(pattern), "%s", path);
     }
 
-    if (!ui_prompt_line(app, "Ignore pattern: ", pattern, sizeof(pattern), NULL) ||
+    if (!ui_show_popup_input(app, "Ignore pattern: ", pattern, sizeof(pattern), NULL) ||
         pattern[0] == '\0') {
         ui_set_status(app, "cancelled");
         return;
@@ -215,20 +215,20 @@ static bool do_save_as_patch(ui_app *app, const changes_backend *backend, const 
     }
 
     char name[128] = "";
-    if (!ui_prompt_line(app, "Patch name: ", name, sizeof(name), NULL) || name[0] == '\0') {
+    if (!ui_show_popup_input(app, "Patch name: ", name, sizeof(name), NULL) || name[0] == '\0') {
         ui_set_status(app, "cancelled");
         free(paths);
         return false;
     }
     char version[32] = "";
-    (void)ui_prompt_line(app, "Version (blank for 1.0): ", version, sizeof(version), NULL);
+    (void)ui_show_popup_input(app, "Version (blank for 1.0): ", version, sizeof(version), NULL);
     char author[128] = "";
-    (void)ui_prompt_line(app, "Author (blank for unknown): ", author, sizeof(author), NULL);
+    (void)ui_show_popup_input(app, "Author (blank for unknown): ", author, sizeof(author), NULL);
     char target[32];
     (void)snprintf(target, sizeof(target), "%s", backend->default_target);
-    (void)ui_prompt_line(app, "Target NetHack version: ", target, sizeof(target), NULL);
+    (void)ui_show_popup_input(app, "Target NetHack version: ", target, sizeof(target), NULL);
     char short_desc[200] = "";
-    (void)ui_prompt_line(app, "Short description: ", short_desc, sizeof(short_desc), NULL);
+    (void)ui_show_popup_input(app, "Short description: ", short_desc, sizeof(short_desc), NULL);
 
     mkp_patch_meta meta = {
         .name = name,

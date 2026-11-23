@@ -199,9 +199,9 @@ static void draw(ui_app *app)
     }
 }
 
-/* The four recipes build.c can run (docs/features.md 10.6) -- "custom"
- * isn't runnable yet (Build screen just reports that) but stays offered
- * since it was always the fallback default, pre-popup. */
+/* The four recipes build.c can run (docs/features.md 10.6); "custom"
+ * reads instance.conf's custom_commands, editable from the Build
+ * screen's own "c" (docs/ui-progress.md). */
 static const char *const RECIPE_OPTIONS[] = {
     "nethack-3.4-unix",
     "nethack-3.6-linux",
@@ -209,7 +209,51 @@ static const char *const RECIPE_OPTIONS[] = {
     "custom",
 };
 
-static void do_new(ui_app *app)
+/* docs/features.md 10.1's two kinds: Managed copies a base source into the
+ * instance's own src/; Linked points at a folder nhpm never touches
+ * (a developer's own git checkout). */
+static const char *const KIND_OPTIONS[] = {
+    "Managed (copy a base source)",
+    "Linked (point at an existing folder)",
+};
+
+static const char *pick_recipe(ui_app *app)
+{
+    size_t recipe_index = 0;
+    bool picked_recipe =
+        ui_show_popup_menu(app, "Build recipe", RECIPE_OPTIONS,
+                           sizeof(RECIPE_OPTIONS) / sizeof(RECIPE_OPTIONS[0]), &recipe_index, draw);
+    return picked_recipe ? RECIPE_OPTIONS[recipe_index] : "custom";
+}
+
+/* docs/features.md 10.5's "New", Linked half: points at an existing
+ * folder (its version read from patchlevel.h the same way sources.c
+ * does) instead of copying a base source. */
+static void do_new_linked(ui_app *app, const char *name)
+{
+    char folder[512] = "";
+    if (!ui_show_popup_input(app, "Folder to link", folder, sizeof(folder), draw) ||
+        folder[0] == '\0') {
+        ui_set_status(app, "cancelled");
+        return;
+    }
+
+    const char *recipe = pick_recipe(app);
+
+    inst_instance inst;
+    nhp_err err = inst_link(name, folder, recipe, &inst);
+    if (err == NHP_OK) {
+        ui_set_status(app, "linked %s -> %s (NetHack %s)", name, folder, inst.source);
+        inst_free(&inst);
+        reload();
+    } else {
+        ui_set_status(app, "could not link %s: %s", name, err_get());
+    }
+}
+
+/* docs/features.md 10.5's "New", Managed half: the original single-kind
+ * flow, copying a base source the user already added on Sources. */
+static void do_new_managed(ui_app *app, const char *name)
 {
     bsrc_source *srcs = NULL;
     size_t src_count = 0;
@@ -217,13 +261,6 @@ static void do_new(ui_app *app)
     if (src_count == 0) {
         ui_set_status(app, "no base sources yet -- add one on the Sources screen first");
         bsrc_list_free(srcs, src_count);
-        return;
-    }
-
-    char name[256] = "";
-    if (!ui_show_popup_input(app, "Instance name", name, sizeof(name), draw) || name[0] == '\0') {
-        bsrc_list_free(srcs, src_count);
-        ui_set_status(app, "cancelled");
         return;
     }
 
@@ -249,11 +286,7 @@ static void do_new(ui_app *app)
     (void)snprintf(version, sizeof(version), "%s", srcs[src_index].version);
     bsrc_list_free(srcs, src_count);
 
-    size_t recipe_index = 0;
-    bool picked_recipe =
-        ui_show_popup_menu(app, "Build recipe", RECIPE_OPTIONS,
-                           sizeof(RECIPE_OPTIONS) / sizeof(RECIPE_OPTIONS[0]), &recipe_index, draw);
-    const char *recipe = picked_recipe ? RECIPE_OPTIONS[recipe_index] : "custom";
+    const char *recipe = pick_recipe(app);
 
     inst_instance inst;
     nhp_err err = inst_new(name, version, recipe, &inst);
@@ -266,6 +299,27 @@ static void do_new(ui_app *app)
     }
 }
 
+static void do_new(ui_app *app)
+{
+    char name[256] = "";
+    if (!ui_show_popup_input(app, "Instance name", name, sizeof(name), draw) || name[0] == '\0') {
+        ui_set_status(app, "cancelled");
+        return;
+    }
+
+    size_t kind_index = 0;
+    bool picked_kind =
+        ui_show_popup_menu(app, "Kind", KIND_OPTIONS,
+                           sizeof(KIND_OPTIONS) / sizeof(KIND_OPTIONS[0]), &kind_index, draw);
+    bool linked = picked_kind && kind_index == 1;
+
+    if (linked) {
+        do_new_linked(app, name);
+    } else {
+        do_new_managed(app, name);
+    }
+}
+
 static void do_clone(ui_app *app)
 {
     if (g_count == 0) {
@@ -274,7 +328,7 @@ static void do_clone(ui_app *app)
     char *old_name = str_dup(g_instances[g_list.selected].name);
 
     char new_name[256] = "";
-    if (!ui_prompt_line(app, "Clone, new name: ", new_name, sizeof(new_name), draw) ||
+    if (!ui_show_popup_input(app, "Clone, new name: ", new_name, sizeof(new_name), draw) ||
         new_name[0] == '\0') {
         ui_set_status(app, "cancelled");
         free(old_name);
@@ -310,7 +364,7 @@ static void do_rename(ui_app *app)
 
     char new_name[256];
     (void)snprintf(new_name, sizeof(new_name), "%s", old_name);
-    bool ok = ui_prompt_line(app, "Rename to: ", new_name, sizeof(new_name), draw);
+    bool ok = ui_show_popup_input(app, "Rename to: ", new_name, sizeof(new_name), draw);
     if (!ok || new_name[0] == '\0' || str_eq(new_name, old_name)) {
         ui_set_status(app, "cancelled");
         free(old_name);
@@ -441,7 +495,7 @@ static void draw_snapshot_dialog(ui_app *app, const char *inst_name, const inst_
 
 /* Blocking dialog (docs/features.md 10.5): Enter restores, x deletes, a
  * adds, Esc closes. Its "a"/Enter/"x" sub-prompts save and restore
- * app->text_input_active, since ui_prompt_line() leaves it false on return. */
+ * app->text_input_active, since ui_show_popup_input() leaves it false on return. */
 static void do_snapshots(ui_app *app)
 {
     if (g_count == 0) {
@@ -496,7 +550,8 @@ static void do_snapshots(ui_app *app)
         }
         if (ch == L'a') {
             char label[128] = "";
-            bool ok = ui_prompt_line(app, "Label (blank for none): ", label, sizeof(label), draw);
+            bool ok =
+                ui_show_popup_input(app, "Label (blank for none): ", label, sizeof(label), draw);
             app->text_input_active = true;
             if (ok) {
                 char *filename = NULL;
@@ -573,7 +628,7 @@ static void do_export(ui_app *app)
 
     char path[512];
     (void)snprintf(path, sizeof(path), "%s.nhinst", name);
-    if (!ui_prompt_line(app, "Export to: ", path, sizeof(path), draw) || path[0] == '\0') {
+    if (!ui_show_popup_input(app, "Export to: ", path, sizeof(path), draw) || path[0] == '\0') {
         ui_set_status(app, "cancelled");
         free(name);
         return;
@@ -591,21 +646,20 @@ static void do_export(ui_app *app)
 static void do_import(ui_app *app)
 {
     char path[512] = "";
-    if (!ui_prompt_line(app, "Import .nhinst, path: ", path, sizeof(path), draw) ||
+    if (!ui_show_popup_input(app, "Import .nhinst, path: ", path, sizeof(path), draw) ||
         path[0] == '\0') {
         ui_set_status(app, "cancelled");
         return;
     }
     char new_name[256] = "";
-    if (!ui_prompt_line(app, "New instance name: ", new_name, sizeof(new_name), draw) ||
+    if (!ui_show_popup_input(app, "New instance name: ", new_name, sizeof(new_name), draw) ||
         new_name[0] == '\0') {
         ui_set_status(app, "cancelled");
         return;
     }
     char source_version[64] = "";
-    (void)ui_prompt_line(app,
-                         "Base source version (blank to use what was exported): ", source_version,
-                         sizeof(source_version), draw);
+    (void)ui_show_popup_input(app, "Base source version (blank to use what was exported): ",
+                              source_version, sizeof(source_version), draw);
 
     inst_instance inst;
     nhp_err err =
@@ -650,7 +704,7 @@ static void do_combined(ui_app *app)
 
     char path[512];
     (void)snprintf(path, sizeof(path), "%s-combined.diff", inst->name);
-    if (!ui_prompt_line(app, "Save to: ", path, sizeof(path), draw) || path[0] == '\0') {
+    if (!ui_show_popup_input(app, "Save to: ", path, sizeof(path), draw) || path[0] == '\0') {
         ui_set_status(app, "cancelled");
         mkp_combined_result_free(&result);
         return;
@@ -691,7 +745,7 @@ static void do_combined(ui_app *app)
 
     if (ui_confirm(app, "Flatten into a new instance?", draw)) {
         char new_name[256] = "";
-        if (!ui_prompt_line(app, "New instance name: ", new_name, sizeof(new_name), draw) ||
+        if (!ui_show_popup_input(app, "New instance name: ", new_name, sizeof(new_name), draw) ||
             new_name[0] == '\0') {
             ui_set_status(app, "cancelled");
         } else {

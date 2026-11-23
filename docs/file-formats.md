@@ -95,12 +95,12 @@ id          = 485
 name        = (New) Dumplog
 author      = Nax
 target      = NetHack 3.6.0
-source_page = https://nhpmdb.alt.org/?485
+source_page = https://nhpatchdb.alt.org/?485
 
 # version.meta
 version       = 1.0.0
 downloaded    = 2026-11-15T14:02:11Z
-url           = https://nhpmdb.alt.org/?download=485
+url           = https://nhpatchdb.alt.org/?download=485
 via_wayback   = no
 sha256        = 3f1c...
 files_touched = src/end.c src/pline.c include/decl.h

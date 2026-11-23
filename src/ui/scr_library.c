@@ -44,10 +44,8 @@ static ui_list g_list;
 
 /* nhpm's search syntax (docs/features.md 13.10), persisted like
  * scr_db.c's g_filter. `in:` is pulled out before idx_query_parse();
- * g_edit_buf mirrors into g_filter each keystroke so the list narrows live. */
+ * do_search() below recomputes the rows live on every keystroke. */
 static char g_filter[256] = "";
-static char g_edit_buf[256] = "";
-static bool g_editing = false;
 
 /* Section 13.9's "s/S next sort column/reverse". Sorting reorders whole
  * patches, not the flattened rows, so a patch's versions stay nested
@@ -369,7 +367,6 @@ static void enter(ui_app *app)
 {
     g_have_inst_version =
         app->active_loaded && ver_parse(app->active_inst.source, &g_inst_version) == NHP_OK;
-    app->text_input_active = g_editing; /* in case a previous visit left it mid-edit */
     reload();
 }
 
@@ -525,11 +522,6 @@ static void draw(ui_app *app)
     (void)wnoutrefresh(w);
 
     draw_details(app);
-
-    if (g_editing) {
-        ui_set_status(app, "Search: %s_   (Enter to apply, Esc to clear)", g_edit_buf);
-        return;
-    }
 
     char state[64] = "";
     if (g_sort_col != LIB_SORT_NONE) {
@@ -698,23 +690,23 @@ static void do_delete_patch(ui_app *app)
 static void do_import(ui_app *app)
 {
     char path[512] = "";
-    if (!ui_prompt_line(app, "Import local .diff, path: ", path, sizeof(path), draw) ||
+    if (!ui_show_popup_input(app, "Import local .diff, path: ", path, sizeof(path), draw) ||
         path[0] == '\0') {
         set_action_status(app, "cancelled");
         return;
     }
     char name[256] = "";
-    if (!ui_prompt_line(app, "Name: ", name, sizeof(name), draw) || name[0] == '\0') {
+    if (!ui_show_popup_input(app, "Name: ", name, sizeof(name), draw) || name[0] == '\0') {
         set_action_status(app, "cancelled");
         return;
     }
     char author[128] = "";
-    (void)ui_prompt_line(app, "Author (blank if unknown): ", author, sizeof(author), draw);
+    (void)ui_show_popup_input(app, "Author (blank if unknown): ", author, sizeof(author), draw);
     char target[64] = "";
-    (void)ui_prompt_line(app, "Target NetHack version (blank for any): ", target, sizeof(target),
-                         draw);
+    (void)ui_show_popup_input(app, "Target NetHack version (blank for any): ", target,
+                              sizeof(target), draw);
     char version[64] = "";
-    (void)ui_prompt_line(app, "Version (blank for \"1.0\"): ", version, sizeof(version), draw);
+    (void)ui_show_popup_input(app, "Version (blank for \"1.0\"): ", version, sizeof(version), draw);
 
     char *id = NULL;
     nhp_err err =
@@ -785,15 +777,15 @@ static void do_check_update(ui_app *app)
 static void do_make_from_folder(ui_app *app)
 {
     char folder[512] = "";
-    if (!ui_prompt_line(app, "Folder to make a patch from: ", folder, sizeof(folder), draw) ||
+    if (!ui_show_popup_input(app, "Folder to make a patch from: ", folder, sizeof(folder), draw) ||
         folder[0] == '\0') {
         set_action_status(app, "cancelled");
         return;
     }
 
     char from[256] = "base";
-    if (!ui_prompt_line(app, "Base (base, folder:<path>, tarball:<path>, or git:<ref>): ", from,
-                        sizeof(from), draw)) {
+    if (!ui_show_popup_input(app, "Base (base, folder:<path>, tarball:<path>, or git:<ref>): ",
+                             from, sizeof(from), draw)) {
         set_action_status(app, "cancelled");
         return;
     }
@@ -829,53 +821,37 @@ static void do_make_from_folder(ui_app *app)
     reload();
 }
 
+/* docs/features.md 13.9's "/": a floating popup box (ui_show_popup_input_live(),
+ * not the status line) that re-filters live on every keystroke; Esc clears
+ * the filter entirely rather than restoring whatever it was before. */
+static void on_search_change(ui_app *app, const char *text)
+{
+    (void)app;
+    (void)snprintf(g_filter, sizeof(g_filter), "%s", text);
+    recompute_rows();
+}
+
+static void do_search(ui_app *app)
+{
+    char search_text[256];
+    (void)snprintf(search_text, sizeof(search_text), "%s", g_filter);
+    bool committed = ui_show_popup_input_live(app, "Search (v: a: id: in:<instance>)", search_text,
+                                              sizeof(search_text), draw, on_search_change);
+    if (!committed) {
+        g_filter[0] = '\0';
+    } else {
+        (void)snprintf(g_filter, sizeof(g_filter), "%s", search_text);
+    }
+    recompute_rows();
+}
+
 static bool handle_key(ui_app *app, wint_t ch)
 {
     WINDOW *w = app->layout.main_win;
     int visible = (w != NULL) ? getmaxy(w) - 3 : 1;
 
-    if (g_editing) {
-        if (ch == L'\n' || ch == KEY_ENTER) {
-            (void)snprintf(g_filter, sizeof(g_filter), "%s", g_edit_buf);
-            g_editing = false;
-            app->text_input_active = false;
-            recompute_rows();
-            return true;
-        }
-        if (ch == 27) { /* Esc: clear the filter entirely */
-            g_filter[0] = '\0';
-            g_edit_buf[0] = '\0';
-            g_editing = false;
-            app->text_input_active = false;
-            recompute_rows();
-            return true;
-        }
-        if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
-            size_t len = strlen(g_edit_buf);
-            if (len > 0) {
-                g_edit_buf[len - 1] = '\0';
-            }
-            (void)snprintf(g_filter, sizeof(g_filter), "%s", g_edit_buf);
-            recompute_rows();
-            return true;
-        }
-        if (ch >= 0x20 && ch < 0x7f) {
-            size_t len = strlen(g_edit_buf);
-            if (len + 1 < sizeof(g_edit_buf)) {
-                g_edit_buf[len] = (char)ch;
-                g_edit_buf[len + 1] = '\0';
-            }
-            (void)snprintf(g_filter, sizeof(g_filter), "%s", g_edit_buf);
-            recompute_rows();
-            return true;
-        }
-        return true; /* editing: swallow everything else too */
-    }
-
     if (ch == L'/') {
-        (void)snprintf(g_edit_buf, sizeof(g_edit_buf), "%s", g_filter);
-        g_editing = true;
-        app->text_input_active = true;
+        do_search(app);
         return true;
     }
 

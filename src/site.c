@@ -11,7 +11,7 @@
 #include <libxml/HTMLparser.h>
 #include <libxml/xpath.h>
 
-#define SITE_BASE_URL "https://nhpmdb.alt.org"
+#define SITE_BASE_URL "https://nhpatchdb.alt.org"
 
 /* ---- small libxml2 helpers ---- */
 

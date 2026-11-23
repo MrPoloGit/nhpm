@@ -24,7 +24,6 @@ planned to working, move it here instead of leaving the gap implicit.
 - [x] No function keys anywhere: F1-F7/F9/F10 are gone (not reliably delivered by every
       terminal/multiplexer/SSH path). Plain-letter bindings instead: `?` help, `q` quit,
       `p` play, Tab/Left then a screen's own `nav_letter` to switch screens
-- [x] `ui_prompt_line()` -- blocking single-line text prompt in the status line
 - [x] `ui_confirm()` -- blocking y/N confirmation in the status line
 - [x] Reusable scrolling text-view widget (`ui_text_view_*`), used by Build's streamed output
       and by `ui_show_text_dialog()` (a blocking modal for an arbitrary block of text, used by
@@ -36,9 +35,9 @@ planned to working, move it here instead of leaving the gap implicit.
       (`panelw`). Wired into Instances' `n` New (base source version, build recipe) and
       Sources' `n` Known version
 - [x] `ui_show_popup_input()`: the same floating box, but for free text a fixed list doesn't
-      fit (a name, a path, a git tag). Wired into Instances' `n` New (instance name) and
-      Sources' `a`/`t`/`g` (path, tag, version hint). `ui_prompt_line()`'s status-line prompt
-      is still used for quick answers like y/N confirms
+      fit (a name, a path, a git tag). Every text entry in the UI goes through this (or
+      `ui_show_popup_input_live()` for a live filter, e.g. `/` search) -- nothing prompts in
+      the status line except `ui_confirm()`'s y/N
 - [x] `ui_show_conflict()`: on any `NHP_ECONFLICT`, shows the patch id/version, per-file hunk
       tally, and raw quilt/patch output (section 11.6's "view the failing hunks") in
       `ui_show_text_dialog()`. Wired into every conflict site: Patches' Space/J/K/x,
@@ -65,21 +64,22 @@ planned to working, move it here instead of leaving the gap implicit.
 
 **F1 Help** -- done (static text, kept in sync with what's actually wired up per screen below).
 
-**F2 Instances**
+**F2 Instances** -- done
 - [x] List (name/version/patches/built/last played), Enter activates. Built status is
       colored (13.8): red "NOT BUILT", yellow "out of date" (`build_is_stale()`), green
       "built". New instances show up before their first build, clearly marked rather than
       hidden
-- [x] `n` New: popups for name, base source version, and build recipe (Esc there defaults to
-      "custom")
+- [x] `n` New: popups for name, Managed/Linked kind, then (Managed) base source version or
+      (Linked) folder, then build recipe (Esc there defaults to "custom")
 - [x] `c` Clone (prompts new name, y/N copy-saves)
 - [x] `r` Rename (keeps the active-instance pointer following a renamed active instance)
 - [x] `x` Delete (confirms, then y/N keep-saves)
-- [x] `t` Snapshots dialog (blocking, modeled on `ui_confirm()`/`ui_prompt_line()`): Enter
+- [x] `t` Snapshots dialog (blocking, modeled on `ui_confirm()`/`ui_show_popup_input()`): Enter
       restores, `x` deletes, `a` adds one with an optional label, Esc closes
 - [x] `e` Export / `i` Import (`.nhinst`): prompts path (export defaults to `<name>.nhinst`;
       import also prompts the new name and an optional base-source version override)
-- [ ] Linked instances (`inst_link`, pointing at an existing folder) -- CLI only so far
+- [x] Linked instances: `n`'s popup now asks Managed/Linked before the recipe; Linked
+      prompts for a folder and calls `inst_link()` instead of picking a base source
 - [x] `C` Combined-patch: prompts a save path (default `<name>-combined.diff`), then y/N
       "add to library?" and "flatten into a new instance?" -- the same three destinations as
       the CLI's `combined --out/--to-library/--flatten`
@@ -99,8 +99,9 @@ planned to working, move it here instead of leaving the gap implicit.
 **F3 Database** -- mostly done
 - [x] List with colored Mk compatibility marks, Downloaded column (shows the version, or "+"
       for more than one)
-- [x] `/` search (commit-on-Enter, Esc clears; `v:`/`a:`/`r:>=N`/`id:` syntax); shown in the
-      status line, not a panel row
+- [x] `/` search (`v:`/`a:`/`r:>=N`/`id:`/`lib:`/`in:` syntax): a floating popup box
+      (`ui_show_popup_input_live()`), re-filtering live on every keystroke, same as every
+      other text input; Esc clears the filter, Enter keeps it and closes the box
 - [x] `Enter`/`d` download (force-fresh: deletes a stale copy of the same version first)
 - [x] `D` download and add to the active instance, enabled
 - [x] `u` uninstall (remove every downloaded version from the library)
@@ -140,17 +141,18 @@ planned to working, move it here instead of leaving the gap implicit.
       `w` on Patches does. Not available for a `git:` base, since that's compared directly
       with `git diff` text and never builds a file-by-file list
 
-**F5 Patches** -- partial
-- [x] List (on/off, id, name, version, target, "(hand-fixed)" marker), Space toggle, J/K move,
-      `x` remove
+**F5 Patches** -- done
+- [x] List (on/off, id, name, version, target, Status column: applied/disabled, "(modified)"
+      for a hand-fixed patch, the "c" dry-run result for a disabled one), Space toggle, J/K
+      move, `x` remove
 - [x] Reloads the active instance fresh on every entry (not just trusting in-memory state)
 - [x] Colored Mk compatibility mark per patch, against the instance's own version
 - [x] `d` Diff view: the selected patch's applied diff, read from the instance's own
       `patches/` folder (not the library's copy -- they can differ for a hand-fixed patch),
       shown in `ui_show_text_dialog()`
-- [x] Backend for `c` (dry-run every disabled patch): `stack_check_disabled()`
-      (docs/features.md 11.7), read-only. Exposed via CLI as `nhpm status --check`; the
-      Patches screen's own `c` key and Status column aren't wired up to it yet
+- [x] `c` (dry-run every disabled patch): `stack_check_disabled()` (docs/features.md 11.7),
+      read-only, also exposed via CLI as `nhpm status --check`. Fills in the list's own
+      Status column (cached until the next stack change shifts indices)
 - [x] `w` opens the Changes dialog (`scr_changes.c`, not a screen in its own right -- see
       below)
 - [x] `N` new empty patch; `E` edit an existing one; `o` open a source file in `$EDITOR`; `R`
@@ -163,19 +165,19 @@ planned to working, move it here instead of leaving the gap implicit.
       header-writing step the way `mkp_capture()`'s patches get -- a patch made via
       N/edit/refresh is a plain diff with correct library metadata, no embedded name/author
       text in the file itself
-- [x] Backend for `u` (undo last change): every `stack_enable`/`disable`/`move`/`add`/
-      `remove` now takes an `auto-<op>-<id>` snapshot first; `stack_undo()` (docs/features.md
-      11.8) finds the latest one and restores it, re-syncing the Quilt folder too. Exposed
-      via CLI as `nhpm undo`. `t` (manual labeled snapshot) is unchanged -- Instances' own
-      Snapshots dialog already covers it; the Patches screen's own `t`/`u` keys aren't wired
-      up yet
-- [ ] "uncaptured changes" header indicator
-- [x] Backend for the multi-patch file-conflict flag: `stack_find_shared_files()`
-      (docs/features.md 11.9), read-only, best-effort via library `files_touched`. Exposed
-      via CLI as part of `nhpm status --check`; the Patches screen's own details-area flag
-      isn't wired up to it yet
+- [x] `u` (undo last change): every `stack_enable`/`disable`/`move`/`add`/`remove` takes an
+      `auto-<op>-<id>` snapshot first; `stack_undo()` (docs/features.md 11.8) finds the
+      latest one and restores it, re-syncing the Quilt folder too (also `nhpm undo`). `t`
+      takes a manual, labeled snapshot the same way Instances' own Snapshots dialog does,
+      without leaving the Patches screen
+- [x] "uncaptured changes" indicator: a `*` marker next to the column headers when
+      `mkp_changes()` finds anything, recomputed after every stack change and on entry
+- [x] The multi-patch file-conflict flag: `stack_find_shared_files()` (docs/features.md
+      11.9), read-only, best-effort via library `files_touched` (also part of CLI's `nhpm
+      status --check`). The details area shows which other enabled patches share a file
+      with the selected one, in `UI_COLOR_WARN`
 
-**F6 Build** -- mostly done
+**F6 Build** -- done
 - [x] `b` runs the active instance's recipe (`build_run()`), streaming each line into the
       panel live using the scrolling text-view widget
 - [x] `error:`/`warning:` lines colored red/yellow (case-insensitive substring match); `e`
@@ -194,10 +196,12 @@ planned to working, move it here instead of leaving the gap implicit.
 - [x] `custom` recipes now run: `instance.conf`'s `custom_commands` (`;`-separated, no
       quoting, `$PREFIX` substituted for the install path, docs/features.md 10.6) is split
       and run through `proc_run_streaming()`, stopping at the first failure; `build_run()`
-      still returns `NHP_EINVAL` only when it's empty. Tested via CLI (`nhpm build`), not yet
-      exercised from the Build screen
-- [ ] Editing `custom_commands` from the Build screen -- the only way to set it today is
-      hand-editing `instance.conf`
+      still returns `NHP_EINVAL` only when it's empty. The Build screen's own `b` no longer
+      blocks `custom` with a stale "not runnable yet" message -- it was never updated when
+      the backend above landed
+- [x] `c` edits `custom_commands` from the Build screen itself (a popup text box, saved via
+      `inst_save()`); the details pane shows the current value when the recipe is `custom`.
+      Hand-editing `instance.conf` is no longer the only way
 
 **F7 Sources** -- done
 - [x] `n` Known versions popup (`ui_show_popup_menu()`): a small, hand-verified catalog

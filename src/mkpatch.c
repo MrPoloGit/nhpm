@@ -854,7 +854,7 @@ nhp_err mkp_combined(const inst_instance *inst, const char *const *include_ids,
             bool is_local = strncmp(p->id, "local-", 6) == 0;
             buf_append_fmt(&contains, "  %zu. %-28s %-8s %s   sha256 %.8s...\n", n,
                            (display_name != NULL) ? display_name : p->id, p->version,
-                           is_local ? "(local)" : "(nhpmdb)",
+                           is_local ? "(local)" : "(nhpatchdb)",
                            (p->sha256[0] != '\0') ? p->sha256 : "unknown ");
             free(display_name);
         }
