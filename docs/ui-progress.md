@@ -57,9 +57,14 @@ planned to working, move it here instead of leaving the gap implicit.
       unchanged (Force is CLI-only)
 - [ ] Progress widget distinct from plain status-line text (current refresh/download progress
       is functional but not the spec's dedicated widget)
-- [x] `s`/`S` sort-column toggle on Database and Library (cycles Name/Author/For/Rating and
-      Name/Version/For; `S` reverses; selection follows its entry across a resort). Patches
-      keeps stack order (J/K move); the other screens have too few rows to bother
+- [x] `s`/`S` sort-column toggle on Database and Library (cycles Name/Author/For/Rating/Id
+      and Name/Version/For/Id; `S` reverses; selection follows its entry across a resort).
+      Id sorts numerically (`strtol`), not as a string, and Library's own `local-<slug>` ids
+      (a made-from-folder patch) sort after every real numeric id instead of reading as 0.
+      Deliberately not added to Patches: its row order is the real Quilt stack order, which
+      J/K already changes for real (with real apply-order consequences); a cosmetic sort
+      there would show an order that doesn't match what J/K would actually do (user request).
+      The other screens have too few rows to bother with any sort
 - [x] A screen's own `draw()` no longer clobbers an action's one-shot result message with its
       generic summary line on the next redraw. Fixed via a sticky status buffer, checked
       first, on Build (`g_build_failed`/`g_build_error`), Sources, Database, Library, and the
@@ -130,16 +135,17 @@ screen below).
       next/previous match (same as `j`/`k`, under 13.9's common-key names)
 - [x] "All versions" toggle (`v`): off shows the newest version plus a "(+)" count; on lists
       every downloaded version comma-separated
-- [x] `lib:`/`in:` search tokens, pulled out before the rest goes through
+- [x] `lib:`/`in:`/`mk:` search tokens, pulled out before the rest goes through
       `idx_query_parse()`: `lib:yes`/`lib:no` filters on whether the patch is downloaded at
-      all; `in:<instance>` on whether it's in that instance's patch stack
+      all; `in:<instance>` on whether it's in that instance's patch stack; `mk:` on the Mk
+      glyph (`mk:!`/`mk:=`/`mk:~`/`mk:?`, or the words `conflict`/`exact`/`fuzzy`/`unknown`)
 
 **F4 Library** -- mostly done
 - [x] List, versions nested under each patch, "Used in" column computed by scanning every
       instance's own patch list
-- [x] `/` search, same syntax as Database (13.10), plus `in:<instance>`; live filtering,
-      `n`/`N` move within the filtered rows
-- [x] `s`/`S` sort-column toggle (Name/Version/For, `S` reverses): reorders whole patches,
+- [x] `/` search, same syntax as Database (13.10), plus `in:<instance>`/`mk:`; live
+      filtering, `n`/`N` move within the filtered rows
+- [x] `s`/`S` sort-column toggle (Name/Version/For/Id, `S` reverses): reorders whole patches,
       keeping each patch's versions nested; the selected row follows its patch/version across
       a resort
 - [x] `Enter` view (shows the selected version's touched files and download URL in the status
@@ -305,4 +311,3 @@ or `m` on Library
 - search for patches page too
 - search for Sources
 - add search to Instances page
-- sort for Database, library, and  id number, name, and filter for Mk

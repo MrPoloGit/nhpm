@@ -55,6 +55,7 @@ typedef enum lib_sort_col {
     LIB_SORT_NAME,
     LIB_SORT_VERSION,
     LIB_SORT_FOR,
+    LIB_SORT_ID,
     LIB_SORT_COUNT
 } lib_sort_col;
 
@@ -186,13 +187,44 @@ static void used_in_text(const char *id, const char *version, buf *out)
     }
 }
 
-/* Splits `raw` into its `in:` token (last one wins, same rule
+/* Forward declaration: defined further down, alongside the rest of the
+ * Mk column's own logic; needed here for recompute_rows()'s `mk:`. */
+static char compat_mark(const char *target);
+
+/* `mk:` filter value against one row's compat_mark() glyph -- mirrors
+ * scr_db.c's own mk_filter_matches(); the raw glyph ("mk:!") or a word
+ * alias ("mk:conflict"), same meanings as the Mk column (features.md 9.4). */
+static bool mk_filter_matches(const char *filter, char mark)
+{
+    if (filter[0] == '\0') {
+        return true;
+    }
+    if (filter[0] != '\0' && filter[1] == '\0') {
+        return filter[0] == mark;
+    }
+    if (strcasecmp(filter, "exact") == 0) {
+        return mark == '=';
+    }
+    if (strcasecmp(filter, "fuzzy") == 0) {
+        return mark == '~';
+    }
+    if (strcasecmp(filter, "conflict") == 0) {
+        return mark == '!';
+    }
+    if (strcasecmp(filter, "unknown") == 0) {
+        return mark == '?';
+    }
+    return true; /* an unrecognized value filters nothing out */
+}
+
+/* Splits `raw` into its `in:`/`mk:` tokens (last one wins, same rule
  * idx_query_parse() uses for its own single-value tokens) and everything
  * else, which still goes through idx_query_parse() unchanged. */
-static void extract_in_filter(const char *raw, char *in_out, size_t in_size, char *rest_out,
-                              size_t rest_size)
+static void extract_in_filter(const char *raw, char *in_out, size_t in_size, char *mk_out,
+                              size_t mk_size, char *rest_out, size_t rest_size)
 {
     in_out[0] = '\0';
+    mk_out[0] = '\0';
     rest_out[0] = '\0';
     char *copy = str_dup(raw);
     if (copy == NULL) {
@@ -206,6 +238,8 @@ static void extract_in_filter(const char *raw, char *in_out, size_t in_size, cha
     while (token != NULL) {
         if (strncasecmp(token, "in:", 3) == 0) {
             (void)snprintf(in_out, in_size, "%s", token + 3);
+        } else if (strncasecmp(token, "mk:", 3) == 0) {
+            (void)snprintf(mk_out, mk_size, "%s", token + 3);
         } else {
             if (rest.len > 0) {
                 (void)buf_append_str(&rest, " ");
@@ -219,6 +253,17 @@ static void extract_in_filter(const char *raw, char *in_out, size_t in_size, cha
     char *rest_text = buf_take(&rest);
     (void)snprintf(rest_out, rest_size, "%s", rest_text);
     free(rest_text);
+}
+
+/* Leading numeric value of a patch id ("485" -> 485), and whether it had
+ * one at all -- ids can be "local-<slug>" for a made-from-folder patch
+ * (library.h), which strtol() would otherwise silently read as 0. */
+static long id_sort_key(const char *id, bool *out_numeric)
+{
+    char *end = NULL;
+    long n = strtol(id, &end, 10);
+    *out_numeric = (end != id);
+    return n;
 }
 
 /* qsort() comparator for g_patches, keyed by g_sort_col/g_sort_desc.
@@ -244,6 +289,20 @@ static int cmp_patches(const void *a, const void *b)
         case LIB_SORT_FOR:
             cmp = strcasecmp(pa->target, pb->target);
             break;
+        case LIB_SORT_ID: {
+            bool a_numeric = false;
+            bool b_numeric = false;
+            long ida = id_sort_key(pa->id, &a_numeric);
+            long idb = id_sort_key(pb->id, &b_numeric);
+            if (a_numeric != b_numeric) {
+                cmp = a_numeric ? -1 : 1; /* numeric ids before "local-..." ones */
+            } else if (a_numeric) {
+                cmp = (ida < idb) ? -1 : (ida > idb ? 1 : 0);
+            } else {
+                cmp = strcasecmp(pa->id, pb->id);
+            }
+            break;
+        }
         default:
             break;
     }
@@ -291,8 +350,10 @@ static void recompute_rows(void)
     }
 
     char in_filter[256];
+    char mk_filter[16];
     char rest[256];
-    extract_in_filter(g_filter, in_filter, sizeof(in_filter), rest, sizeof(rest));
+    extract_in_filter(g_filter, in_filter, sizeof(in_filter), mk_filter, sizeof(mk_filter), rest,
+                      sizeof(rest));
 
     idx_query query;
     if (idx_query_parse(rest, &query) != NHP_OK) {
@@ -306,6 +367,9 @@ static void recompute_rows(void)
         size_t i = order[k];
         const lib_patch *p = &g_patches[i];
         if (!patch_matches(p, &query)) {
+            continue;
+        }
+        if (!mk_filter_matches(mk_filter, compat_mark(p->target))) {
             continue;
         }
         for (size_t v = 0; v < p->version_count; v++) {
@@ -525,7 +589,7 @@ static void draw(ui_app *app)
 
     char state[64] = "";
     if (g_sort_col != LIB_SORT_NONE) {
-        static const char *names[LIB_SORT_COUNT] = {"none", "name", "version", "for"};
+        static const char *names[LIB_SORT_COUNT] = {"none", "name", "version", "for", "id"};
         (void)snprintf(state, sizeof(state), ", sorted by %s %s", names[g_sort_col],
                        g_sort_desc ? "desc" : "asc");
     }

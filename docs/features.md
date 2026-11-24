@@ -1108,6 +1108,7 @@ Plain words match name, author and description (case-insensitive, all must match
 | `lib:yes` / `lib:no` | in the library or not |
 | `in:367-colorful` | used by that instance (Library) |
 | `id:485` | exact ID |
+| `mk:!` (or `mk:=`/`mk:~`/`mk:?`) | by Mk glyph: conflict/exact/fuzzy/unknown (9.4); `mk:conflict` etc. also work |
 
 ### 13.11 Minimum size and accessibility
 

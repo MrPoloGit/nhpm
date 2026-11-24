@@ -46,6 +46,7 @@ typedef enum db_sort_col {
     DB_SORT_AUTHOR,
     DB_SORT_FOR,
     DB_SORT_RATING,
+    DB_SORT_ID,
     DB_SORT_COUNT
 } db_sort_col;
 
@@ -104,14 +105,20 @@ static bool id_used_by(const char *id, const char *inst_name)
     return false;
 }
 
-/* Splits `raw` into `in:`/`lib:` tokens (last one wins) and everything
- * else, which still goes through idx_query_parse() unchanged -- mirrors
- * scr_library.c's extract_in_filter(), plus the extra `lib:`. */
+/* Forward declaration: defined further down, alongside the rest of the
+ * Mk column's own logic; needed here for recompute_results()'s `mk:`. */
+static char compat_mark(const idx_entry *entry);
+
+/* Splits `raw` into `in:`/`lib:`/`mk:` tokens (last one wins) and
+ * everything else, which still goes through idx_query_parse() unchanged --
+ * mirrors scr_library.c's extract_in_filter(), plus the extra tokens. */
 static void extract_db_filters(const char *raw, char *in_out, size_t in_size, char *lib_out,
-                               size_t lib_size, char *rest_out, size_t rest_size)
+                               size_t lib_size, char *mk_out, size_t mk_size, char *rest_out,
+                               size_t rest_size)
 {
     in_out[0] = '\0';
     lib_out[0] = '\0';
+    mk_out[0] = '\0';
     rest_out[0] = '\0';
     char *copy = str_dup(raw);
     if (copy == NULL) {
@@ -127,6 +134,8 @@ static void extract_db_filters(const char *raw, char *in_out, size_t in_size, ch
             (void)snprintf(in_out, in_size, "%s", token + 3);
         } else if (strncasecmp(token, "lib:", 4) == 0) {
             (void)snprintf(lib_out, lib_size, "%s", token + 4);
+        } else if (strncasecmp(token, "mk:", 3) == 0) {
+            (void)snprintf(mk_out, mk_size, "%s", token + 3);
         } else {
             if (rest.len > 0) {
                 (void)buf_append_str(&rest, " ");
@@ -140,6 +149,32 @@ static void extract_db_filters(const char *raw, char *in_out, size_t in_size, ch
     char *rest_text = buf_take(&rest);
     (void)snprintf(rest_out, rest_size, "%s", rest_text);
     free(rest_text);
+}
+
+/* `mk:` filter value against one row's compat_mark() glyph -- the raw
+ * glyph ("mk:!") or a word alias ("mk:conflict"), same meanings as the
+ * Mk column itself (docs/features.md 9.4). Empty filter matches everything. */
+static bool mk_filter_matches(const char *filter, char mark)
+{
+    if (filter[0] == '\0') {
+        return true;
+    }
+    if (filter[0] != '\0' && filter[1] == '\0') {
+        return filter[0] == mark;
+    }
+    if (strcasecmp(filter, "exact") == 0) {
+        return mark == '=';
+    }
+    if (strcasecmp(filter, "fuzzy") == 0) {
+        return mark == '~';
+    }
+    if (strcasecmp(filter, "conflict") == 0) {
+        return mark == '!';
+    }
+    if (strcasecmp(filter, "unknown") == 0) {
+        return mark == '?';
+    }
+    return true; /* an unrecognized value filters nothing out */
 }
 
 /* qsort() comparator for g_results, keyed by g_sort_col/g_sort_desc --
@@ -176,6 +211,14 @@ static int cmp_entries(const void *a, const void *b)
             cmp = (ra < rb) ? -1 : (ra > rb ? 1 : 0);
             break;
         }
+        case DB_SORT_ID: {
+            /* the site's IDs are always numeric, so compare as numbers,
+             * not strings ("9" would otherwise sort after "10"). */
+            long ida = strtol(ea->id, NULL, 10);
+            long idb = strtol(eb->id, NULL, 10);
+            cmp = (ida < idb) ? -1 : (ida > idb ? 1 : 0);
+            break;
+        }
         default:
             break;
     }
@@ -191,9 +234,10 @@ static void recompute_results(void)
 
     char in_filter[256];
     char lib_filter[16];
+    char mk_filter[16];
     char rest[256];
-    extract_db_filters(g_filter, in_filter, sizeof(in_filter), lib_filter, sizeof(lib_filter), rest,
-                       sizeof(rest));
+    extract_db_filters(g_filter, in_filter, sizeof(in_filter), lib_filter, sizeof(lib_filter),
+                       mk_filter, sizeof(mk_filter), rest, sizeof(rest));
 
     idx_query query;
     if (idx_query_parse(rest, &query) != NHP_OK) {
@@ -230,6 +274,9 @@ static void recompute_results(void)
             }
         }
         if (in_filter[0] != '\0' && !id_used_by(entry->id, in_filter)) {
+            continue;
+        }
+        if (!mk_filter_matches(mk_filter, compat_mark(entry))) {
             continue;
         }
         g_results[n++] = entry;
@@ -472,7 +519,8 @@ static void draw(ui_app *app)
 
     char state[96] = "";
     if (g_sort_col != DB_SORT_NONE) {
-        static const char *names[DB_SORT_COUNT] = {"none", "name", "author", "for", "rating"};
+        static const char *names[DB_SORT_COUNT] = {"none", "name", "author", "for", "rating",
+                                                    "id"};
         (void)snprintf(state, sizeof(state), ", sorted by %s %s", names[g_sort_col],
                        g_sort_desc ? "desc" : "asc");
     }
