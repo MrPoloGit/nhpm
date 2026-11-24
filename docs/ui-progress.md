@@ -304,6 +304,5 @@ or `m` on Library
 - search feature on database isnt working
 - search for patches page too
 - search for Sources
-- how to create an instance, select patches from the library, and then building
 - add search to Instances page
-- sort Database, library id number, name, and filter for Mk
+- sort for Database, library, and  id number, name, and filter for Mk

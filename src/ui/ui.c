@@ -655,8 +655,11 @@ nhp_err ui_run(bool debug)
         return err;
     }
 
-    ui_reload_active_instance(&g_app);
+    /* relayout() first: ui_reload_active_instance() can trigger a drift
+     * dialog, which draws into app->layout's windows -- before relayout()
+     * creates them, that still blocks on input, just invisibly. */
     relayout(&g_app);
+    ui_reload_active_instance(&g_app);
     g_app.screen_index = 0;
     const ui_screen *screen = current_screen(&g_app);
     if (screen->enter != NULL) {
