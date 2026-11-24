@@ -251,7 +251,6 @@ static void draw(ui_app *app)
 static const char *const RECIPE_OPTIONS[] = {
     "nethack-3.4-unix",
     "nethack-3.6-linux",
-    "nethack-3.7-linux",
     "nethack-5.0-linux",
     "custom",
 };

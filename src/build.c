@@ -85,8 +85,8 @@ static nhp_err run_make_step(const char *src_dir, const char *verb, const char *
 }
 
 /* docs/features.md 10.6's unix-family recipe: setup.sh [hint_path], optional
- * "make fetch-lua" (3.7 only), then "make all"/"make install", both with
- * PREFIX=install_dir, `extra_vars` (recipe-specific, below) and `make_vars`. */
+ * "make fetch-lua" (5.0+, which grew embedded Lua), then "make all"/
+ * "make install", both with PREFIX=install_dir, `extra_vars` and `make_vars`. */
 static nhp_err run_unix_recipe(const char *src_dir, const char *install_dir, const char *hint_path,
                                bool fetch_lua, const char *const *extra_vars, const char *make_vars,
                                proc_line_fn on_line, void *user_data, buf *log)
@@ -227,10 +227,6 @@ static nhp_err run_recipe(const char *recipe, const char *src_dir, const char *i
     }
     if (str_eq(recipe, "nethack-3.6-linux")) {
         return run_unix_recipe(src_dir, install_dir, "sys/unix/hints/linux", false, GNU89_VARS,
-                               make_vars, on_line, user_data, log);
-    }
-    if (str_eq(recipe, "nethack-3.7-linux")) {
-        return run_unix_recipe(src_dir, install_dir, "sys/unix/hints/linux.370", true, GNU89_VARS,
                                make_vars, on_line, user_data, log);
     }
     if (str_eq(recipe, "nethack-5.0-linux")) {

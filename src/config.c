@@ -382,6 +382,8 @@ void cfg_app_defaults(cfg_app *app)
     app->request_delay_ms = 1000;
     app->wayback_fallback = true;
     app->max_download_mb = 5;
+    app->check_updates = true;
+    app->update_check_max_age_days = 3;
     app->author_name = str_dup("");
     app->ignore = str_dup("");
     app->pager = str_dup("less");
@@ -440,6 +442,9 @@ nhp_err cfg_app_load(cfg_app *app)
     app->request_delay_ms = cfg_get_long(&doc, NULL, "request_delay_ms", app->request_delay_ms);
     app->wayback_fallback = cfg_get_bool(&doc, NULL, "wayback_fallback", app->wayback_fallback);
     app->max_download_mb = cfg_get_long(&doc, NULL, "max_download_mb", app->max_download_mb);
+    app->check_updates = cfg_get_bool(&doc, NULL, "check_updates", app->check_updates);
+    app->update_check_max_age_days =
+        cfg_get_long(&doc, NULL, "update_check_max_age_days", app->update_check_max_age_days);
 
     err = apply_string_override(&app->author_name, cfg_get(&doc, NULL, "author_name", NULL));
     if (err == NHP_OK) {
@@ -479,21 +484,32 @@ nhp_err cfg_app_save(const cfg_app *app)
     char age_buf[32];
     char delay_buf[32];
     char size_buf[32];
+    char update_age_buf[32];
     snprintf(age_buf, sizeof(age_buf), "%ld", app->index_max_age_days);
     snprintf(delay_buf, sizeof(delay_buf), "%ld", app->request_delay_ms);
     snprintf(size_buf, sizeof(size_buf), "%ld", app->max_download_mb);
+    snprintf(update_age_buf, sizeof(update_age_buf), "%ld", app->update_check_max_age_days);
 
     const char *keys[] = {"index_max_age_days",
                           "request_delay_ms",
                           "wayback_fallback",
                           "max_download_mb",
+                          "check_updates",
+                          "update_check_max_age_days",
                           "author_name",
                           "ignore",
                           "pager",
                           "editor"};
-    const char *values[] = {age_buf,    delay_buf,        app->wayback_fallback ? "yes" : "no",
-                            size_buf,   app->author_name, app->ignore,
-                            app->pager, app->editor};
+    const char *values[] = {age_buf,
+                            delay_buf,
+                            app->wayback_fallback ? "yes" : "no",
+                            size_buf,
+                            app->check_updates ? "yes" : "no",
+                            update_age_buf,
+                            app->author_name,
+                            app->ignore,
+                            app->pager,
+                            app->editor};
 
     err = NHP_OK;
     for (size_t i = 0; i < NHP_ARRAY_LEN(keys) && err == NHP_OK; i++) {
@@ -573,7 +589,7 @@ static char *ui_state_path(void)
     return path;
 }
 
-char *cfg_get_active_instance(void)
+char *cfg_get_ui_state(const char *key)
 {
     char *path = ui_state_path();
     if (path == NULL) {
@@ -589,13 +605,13 @@ char *cfg_get_active_instance(void)
         return NULL;
     }
 
-    const char *value = cfg_get(&doc, NULL, "active_instance", NULL);
+    const char *value = cfg_get(&doc, NULL, key, NULL);
     char *result = (value != NULL && value[0] != '\0') ? str_dup(value) : NULL;
     cfg_doc_free(&doc);
     return result;
 }
 
-nhp_err cfg_set_active_instance(const char *name)
+nhp_err cfg_set_ui_state(const char *key, const char *value)
 {
     char *dir = cfg_xdg_config_dir();
     if (dir == NULL) {
@@ -621,11 +637,21 @@ nhp_err cfg_set_active_instance(const char *name)
         return err;
     }
 
-    err = cfg_set(&doc, NULL, "active_instance", name);
+    err = cfg_set(&doc, NULL, key, value);
     if (err == NHP_OK) {
         err = cfg_doc_save(path, &doc);
     }
     free(path);
     cfg_doc_free(&doc);
     return err;
+}
+
+char *cfg_get_active_instance(void)
+{
+    return cfg_get_ui_state("active_instance");
+}
+
+nhp_err cfg_set_active_instance(const char *name)
+{
+    return cfg_set_ui_state("active_instance", name);
 }

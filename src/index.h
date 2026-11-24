@@ -37,12 +37,14 @@ nhp_err idx_save(const idx_index *idx);
  * callers should treat unknown the same as "very old". */
 long idx_age_seconds(void);
 
-/* Called once per browse page fetched during idx_refresh(), 1-based. */
-typedef void (*idx_progress_fn)(void *user_data, size_t page, size_t total_pages);
+/* Called once per browse page fetched during idx_refresh(), 1-based.
+ * Return true to cancel (idx_refresh() then returns NHP_ECANCELED),
+ * same convention as net.h's net_progress_fn. */
+typedef bool (*idx_progress_fn)(void *user_data, size_t page, size_t total_pages);
 
-/* Fetches every browse page (one request at a time, request_delay_ms apart,
- * docs/features.md 7.5), replaces *idx, writes index.tsv/.meta. All-or-nothing:
- * on failure partway through, *idx and the on-disk files are untouched. */
+/* Fetches every browse page (one request at a time, request_delay_ms
+ * apart, docs/features.md 7.5), replaces *idx, writes index.tsv/.meta.
+ * All-or-nothing: on failure or cancellation, *idx is untouched. */
 nhp_err idx_refresh(idx_index *idx, const cfg_app *app, idx_progress_fn progress, void *user_data);
 
 /* nhpm's search syntax (docs/features.md 13.10). `min_rating` is -1 if no

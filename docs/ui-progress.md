@@ -55,12 +55,31 @@ planned to working, move it here instead of leaving the gap implicit.
       `r:` mini-language idx_query_parse() has, just plain words against their own columns
 - [x] `ui_show_conflict()`: on any `NHP_ECONFLICT`, shows the patch id/version, per-file hunk
       tally, and raw quilt/patch output (section 11.6's "view the failing hunks") in
-      `ui_show_text_dialog()`. Wired into every conflict site: Patches' Space/J/K/x,
-      Database's `D`, Library's `a`, Instances' flatten, and the CLI. No `[F]orce`/`[V]iew`/
-      `[C]ancel` choice dialog yet -- a conflict just shows the detail and leaves the instance
-      unchanged (Force is CLI-only)
-- [ ] Progress widget distinct from plain status-line text (current refresh/download progress
-      is functional but not the spec's dedicated widget)
+      `ui_show_text_dialog()`. Wired into every conflict site that has nothing sensible to
+      force: Patches' disable/J/K/x, Instances' flatten, and the CLI.
+- [x] `ui_resolve_conflict()`: the real `[F]orce`/`[V]iew`/`[C]ancel` choice (`ui_show_popup_menu()`),
+      for the one conflict site where Force actually applies -- enabling the patch itself
+      (`conflict->is_requested_patch`). Wired into Patches' Space (enable, not disable),
+      Database's `D` and Library's `a` (both add-then-enable). Force hands `$EDITOR` every
+      failed file plus its `.rej` (`ui_run_editor()`, new and shared with Patches' own `o`)
+      then calls `stack_force_finish()`. No CLI equivalent of the three-way choice exists --
+      `stack_force_begin()`/`stack_force_finish()` are reachable only from the UI so far.
+- [x] `ui_draw_progress()` (`widgets.c`/`widgets.h`): the real 13.5 progress widget -- a
+      `[####----]  45%` bar plus text in the status line, colored `UI_COLOR_OK` (reverse
+      video if monochrome), repainting immediately like `ui_flush_status()`. Negative
+      `fraction` (total not yet known) draws no bar, just the text, same as before. Wired
+      into Database's index-refresh progress (`scr_db.c`) and Sources' known-version
+      download progress (`scr_sources.c`) -- the only two real progress-callback sites.
+- [x] Esc now cancels those same two progress-callback sites (13.6), same `nodelay()`+
+      `wget_wch()` poll as Build's own `on_build_line()`, `q` also flagging `quit_requested`
+      for the same reason. `scr_sources.c`'s `known_download_progress()` polls directly
+      (`net_progress_fn` already returned `bool`). `idx_progress_fn` (`index.h`) had to widen
+      from `void` to `bool` first -- `idx_refresh()` now returns `NHP_ECANCELED` and leaves
+      `*idx` untouched on cancel, same all-or-nothing contract a plain fetch failure already
+      had. The CLI's own `refresh_progress()` (`main.c`) always returns `false`: no
+      interactive cancel there, Ctrl-C already works. Confirmed live (pty) for both sites:
+      Esc mid-refresh and mid-download both land on a clean "canceled" status and exit
+      normally.
 - [x] `s`/`S` sort-column toggle on Database and Library (cycles Name/Author/For/Rating/Id
       and Name/Version/For/Id; `S` reverses; selection follows its entry across a resort).
       Id sorts numerically (`strtol`), not as a string, and Library's own `local-<slug>` ids
@@ -173,6 +192,10 @@ screen below).
       version
 - [x] Colored Mk compatibility mark (same `=`/`~`/`!`/`?` as Database, against the active
       instance's version), one per row/version
+- [x] `f` fold/unfold (docs/features.md 10.7/13.9): collapses the selected row's patch to
+      just its named row, `(+)` appended to the version column same as Database's own "all
+      versions off". Persisted as `library_folded` in ui-state (comma-separated ids),
+      restored once per process on first entry. A one-version patch has nothing to fold
 - [ ] `r:>=N` search token: no-op here -- `lib_patch` carries no rating, only the Database's
       `idx_entry` does
 - [x] `m` Make from folder: prompts folder and base (`base`/`folder:P`/`tarball:P`/`git:REF`,
@@ -300,9 +323,11 @@ or `m` on Library
       ticked files (`mkp_capture()` for `w`, `mkp_from_folder()` for `m`); closes the dialog
       on success
 - [x] Esc closes without saving
-- [ ] Per-row +/- line counts and the inline diff-snippet strip from the 12.5 mockup --
-      skipped for now (would need per-file diff splitting); `Enter`'s full diff covers the
-      same need
+- [x] Per-row `+/-` line counts and the Details pane's first-hunk snippet from the 12.5
+      mockup: `parse_diff_stats()` parses one combined `full_diff()` call (every non-binary
+      file, run once per dialog open) into per-file counts and a snippet, splitting on each
+      file's own `diff -Naur a/X b/X` header. Shown in `app->layout.details` as the selection
+      moves -- `Enter`'s full diff still covers seeing more than the first hunk
 - [x] `h` toggles showing build-output files guessed hidden: they're tagged
       (`mkp_file.hidden`) instead of dropped, so the dialog can reveal and even tick one.
       `mkp_combined()` still excludes hidden files from the actual diff regardless. The CLI's
@@ -314,13 +339,5 @@ or `m` on Library
       12.6's "from any modified folder") via a backend-agnostic dialog loop (two callbacks,
       `full_diff`/`commit`). Not available for a `git:` base on `m` -- see F4 Library's note
       above
-
-## Testing
-
-- [ ] Automated tmux smoke test (`testing.md` 17.3)
-- [ ] Manual checklist pass recorded
-- Verification so far has been: build/lint/test green after each change, plus the user
-  exercising each screen live and reporting back (per their own request -- the UI is not
-  self-tested via tmux in this project going forward).
 
 ## Issues

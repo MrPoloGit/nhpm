@@ -323,18 +323,34 @@ static void format_replace_prompt(const char *version, char *out, size_t out_siz
  * of hunting down a URL or tag yourself -- a/t/g below stay as the
  * manual add flow for anything not in this list. */
 
-/* net_download()'s progress callback -- never cancels; Esc-to-cancel
- * mid-download (13.6) isn't implemented here yet, same gap as the
- * Database screen's own refresh progress. */
+/* net_download()'s progress callback. Esc/`q` cancels (13.6) -- `q` also
+ * flags quit_requested, same reasoning as scr_build.c's on_build_line():
+ * normal key handling is blocked during a download. */
 static bool known_download_progress(void *user_data, double done_bytes, double total_bytes)
 {
     ui_app *app = user_data;
+    char text[64];
+    double fraction;
     if (total_bytes > 0) {
-        ui_set_status(app, "downloading... %.1f/%.1f MB", done_bytes / 1e6, total_bytes / 1e6);
+        (void)snprintf(text, sizeof(text), "downloading... %.1f/%.1f MB", done_bytes / 1e6,
+                       total_bytes / 1e6);
+        fraction = done_bytes / total_bytes;
     } else {
-        ui_set_status(app, "downloading... %.1f MB", done_bytes / 1e6);
+        (void)snprintf(text, sizeof(text), "downloading... %.1f MB", done_bytes / 1e6);
+        fraction = -1.0;
     }
-    ui_flush_status(app);
+    ui_draw_progress(app, fraction, text);
+
+    (void)nodelay(stdscr, TRUE);
+    wint_t ch = 0;
+    int r = wget_wch(stdscr, &ch);
+    (void)nodelay(stdscr, FALSE);
+    if (r != ERR && (ch == 27 || ch == L'q')) {
+        if (ch != 27) {
+            app->quit_requested = true;
+        }
+        return true;
+    }
     return false;
 }
 
@@ -389,6 +405,8 @@ static void do_pick_known_version(ui_app *app)
     if (err == NHP_OK) {
         set_action_status(app, "added base source %s", version);
         reload();
+    } else if (err == NHP_ECANCELED) {
+        set_action_status(app, "canceled adding %s", entry->version);
     } else {
         set_action_status(app, "could not add %s: %s", entry->version, err_get());
     }

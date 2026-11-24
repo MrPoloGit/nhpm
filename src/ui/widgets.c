@@ -154,6 +154,69 @@ void ui_draw_panel(WINDOW *win, const char *title)
     }
 }
 
+void ui_draw_progress(ui_app *app, double fraction, const char *text)
+{
+    WINDOW *w = app->layout.status;
+    if (w == NULL) {
+        return;
+    }
+    (void)werase(w);
+
+    int cols = app->layout.cols;
+    int col = 0;
+    if (fraction >= 0.0) {
+        if (fraction > 1.0) {
+            fraction = 1.0;
+        }
+        int bar_width = 22;
+        if (bar_width > cols - 8) {
+            bar_width = cols - 8;
+        }
+        if (bar_width >= 4) {
+            int fill_width = bar_width - 2;
+            int filled = (int)(fraction * fill_width + 0.5);
+            if (filled > fill_width) {
+                filled = fill_width;
+            }
+            char bar[64];
+            int n = 0;
+            bar[n++] = '[';
+            for (int i = 0; i < fill_width && n < (int)sizeof(bar) - 2; i++) {
+                bar[n++] = (i < filled) ? '#' : '-';
+            }
+            bar[n++] = ']';
+            bar[n] = '\0';
+
+            bool colorize = !app->monochrome;
+            if (colorize) {
+                (void)wattron(w, COLOR_PAIR(UI_COLOR_OK));
+            }
+            (void)mvwaddnstr(w, 0, 0, bar, cols);
+            if (colorize) {
+                (void)wattroff(w, COLOR_PAIR(UI_COLOR_OK));
+            }
+            col = n;
+
+            char pct[8];
+            (void)snprintf(pct, sizeof(pct), " %3d%%", (int)(fraction * 100.0 + 0.5));
+            int pct_len = (int)strlen(pct);
+            if (col + pct_len < cols) {
+                (void)mvwaddnstr(w, 0, col, pct, cols - col);
+                col += pct_len;
+            }
+        }
+    }
+    if (text != NULL && text[0] != '\0' && col < cols) {
+        int text_col = col + (col > 0 ? 1 : 0);
+        if (text_col < cols) {
+            (void)mvwaddnstr(w, 0, text_col, text, cols - text_col);
+        }
+    }
+    (void)wnoutrefresh(w);
+    (void)doupdate();
+    (void)fflush(stdout);
+}
+
 bool ui_confirm(ui_app *app, const char *message, void (*redraw)(ui_app *app))
 {
     app->text_input_active = true;

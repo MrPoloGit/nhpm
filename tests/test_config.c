@@ -137,6 +137,8 @@ static void test_app_config_round_trip(void)
     app.author_name = str_dup("Test Author");
     app.index_max_age_days = 14;
     app.wayback_fallback = false;
+    app.check_updates = false;
+    app.update_check_max_age_days = 30;
 
     CHECK(cfg_app_save(&app) == NHP_OK);
     cfg_app_free(&app);
@@ -146,6 +148,8 @@ static void test_app_config_round_trip(void)
     CHECK(cfg_app_load(&loaded) == NHP_OK);
     CHECK(loaded.index_max_age_days == 14);
     CHECK(loaded.wayback_fallback == false);
+    CHECK(loaded.check_updates == false);
+    CHECK(loaded.update_check_max_age_days == 30);
     CHECK(loaded.author_name != NULL && strcmp(loaded.author_name, "Test Author") == 0);
     cfg_app_free(&loaded);
 
@@ -165,6 +169,8 @@ static void test_app_config_missing_file(void)
     CHECK(cfg_app_load(&app) == NHP_OK);
     CHECK(app.index_max_age_days == 7);
     CHECK(app.wayback_fallback == true);
+    CHECK(app.check_updates == true);
+    CHECK(app.update_check_max_age_days == 3);
     cfg_app_free(&app);
 
     unsetenv("XDG_CONFIG_HOME");
@@ -225,31 +231,60 @@ static void test_active_instance_round_trip(void)
     free(got);
 
     /* a second write preserves other keys already in the file (M7's
-     * eventual last_screen/db_filter/etc., simulated here directly) */
-    char *path = path_join(tmp_home, "nhpm/ui-state");
-    char *data = NULL;
-    size_t len = 0;
-    CHECK(fs_read_file(path, &data, &len) == NHP_OK);
-    buf b;
-    buf_init(&b);
-    buf_append_str(&b, data);
-    buf_append_str(&b, "last_screen = patches\n");
-    char *augmented = buf_take(&b);
-    CHECK(fs_write_atomic(path, augmented, strlen(augmented)) == NHP_OK);
-    free(data);
-    free(augmented);
+     * last_screen/db_filter/db_sort, via the generic cfg_*_ui_state()
+     * below cfg_get/set_active_instance() is now a thin wrapper over) */
+    CHECK(cfg_set_ui_state("last_screen", "patches") == NHP_OK);
 
     CHECK(cfg_set_active_instance("another") == NHP_OK);
     got = cfg_get_active_instance();
     CHECK(got != NULL && str_eq(got, "another"));
     free(got);
 
+    char *path = path_join(tmp_home, "nhpm/ui-state");
     char *final_data = NULL;
     size_t final_len = 0;
     CHECK(fs_read_file(path, &final_data, &final_len) == NHP_OK);
     CHECK(strstr(final_data, "last_screen") != NULL);
     free(final_data);
     free(path);
+
+    unsetenv("XDG_CONFIG_HOME");
+    fs_remove_tree(tmp_home);
+    free(tmp_home);
+}
+
+static void test_ui_state_generic_round_trip(void)
+{
+    char *tmp_home = fs_make_temp_dir("nhp-test-xdg");
+    CHECK(tmp_home != NULL);
+    setenv("XDG_CONFIG_HOME", tmp_home, 1);
+
+    CHECK(cfg_get_ui_state("db_filter") == NULL); /* no ui-state file yet */
+
+    CHECK(cfg_set_ui_state("last_screen", "db") == NHP_OK);
+    CHECK(cfg_set_ui_state("db_filter", "v:3.6") == NHP_OK);
+    CHECK(cfg_set_ui_state("db_sort", "rating:desc") == NHP_OK);
+
+    char *last_screen = cfg_get_ui_state("last_screen");
+    CHECK(last_screen != NULL && str_eq(last_screen, "db"));
+    free(last_screen);
+
+    char *db_filter = cfg_get_ui_state("db_filter");
+    CHECK(db_filter != NULL && str_eq(db_filter, "v:3.6"));
+    free(db_filter);
+
+    char *db_sort = cfg_get_ui_state("db_sort");
+    CHECK(db_sort != NULL && str_eq(db_sort, "rating:desc"));
+    free(db_sort);
+
+    /* clearing a filter writes it back out as empty, same convention as
+     * every other "unset" value in cfg_app -- not removed outright. */
+    CHECK(cfg_set_ui_state("db_filter", "") == NHP_OK);
+    CHECK(cfg_get_ui_state("db_filter") == NULL); /* cfg_get_ui_state treats "" as unset */
+
+    char *still_there = cfg_get_ui_state("db_sort");
+    CHECK(still_there != NULL && str_eq(still_there, "rating:desc"));
+    free(still_there);
 
     unsetenv("XDG_CONFIG_HOME");
     fs_remove_tree(tmp_home);
@@ -267,6 +302,7 @@ int main(void)
     test_app_config_missing_file();
     test_add_ignore_pattern();
     test_active_instance_round_trip();
+    test_ui_state_generic_round_trip();
 
     if (failures == 0) {
         (void)printf("ok: all config tests passed\n");

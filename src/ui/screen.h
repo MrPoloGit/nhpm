@@ -120,6 +120,16 @@ bool ui_require_write_access(ui_app *app);
  * ui_show_text_dialog(). Called by every screen that can hit NHP_ECONFLICT. */
 void ui_show_conflict(ui_app *app, const stack_conflict *conflict);
 
+/* docs 11.6's Force/View/Cancel for a conflict on the patch at `index`
+ * itself (conflict->is_requested_patch -- otherwise fall back to
+ * ui_show_conflict()). Returns true only if Force completed. */
+bool ui_resolve_conflict(ui_app *app, inst_instance *inst, size_t index,
+                         const stack_conflict *conflict);
+
+/* Resolves $EDITOR (then config's own `editor`, else "vi") and hands the
+ * terminal to it with every path in `paths` as an argument (13.7). */
+nhp_err ui_run_editor(ui_app *app, const char *const *paths, size_t count);
+
 /* The Changes dialog (docs 12.5): review the active instance's uncaptured
  * edits and save some as a new patch. Not a screen (no F-key); opened by
  * 'w' on Patches, blocking until Esc. Defined in scr_changes.c. */

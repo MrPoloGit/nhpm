@@ -459,8 +459,10 @@ nhp_err idx_refresh(idx_index *idx, const cfg_app *app, idx_progress_fn progress
         idx_free(&fresh);
         return err;
     }
-    if (progress != NULL) {
-        progress(user_data, 1, (total_pages > 0) ? total_pages : 1);
+    if (progress != NULL && progress(user_data, 1, (total_pages > 0) ? total_pages : 1)) {
+        idx_free(&fresh);
+        err_set("index refresh was canceled");
+        return NHP_ECANCELED;
     }
 
     struct timespec delay = {
@@ -476,8 +478,10 @@ nhp_err idx_refresh(idx_index *idx, const cfg_app *app, idx_progress_fn progress
             idx_free(&fresh);
             return err;
         }
-        if (progress != NULL) {
-            progress(user_data, page_number, total_pages);
+        if (progress != NULL && progress(user_data, page_number, total_pages)) {
+            idx_free(&fresh);
+            err_set("index refresh was canceled");
+            return NHP_ECANCELED;
         }
     }
 

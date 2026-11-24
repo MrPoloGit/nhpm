@@ -90,6 +90,8 @@ typedef struct cfg_app {
     long request_delay_ms;
     bool wayback_fallback;
     long max_download_mb;
+    bool check_updates; /* docs/features.md 14, nhpm-plan.md M8 */
+    long update_check_max_age_days;
     char *author_name; /* "" if not set */
     char *ignore;      /* extra ignore patterns (docs/features.md 12.1), "" if not set */
     char *pager;
@@ -112,8 +114,17 @@ nhp_err cfg_app_add_ignore_pattern(cfg_app *app, const char *pattern);
 void cfg_app_free(cfg_app *app);
 
 /* ---- the app's own UI state: ~/.config/nhpm/ui-state (docs/features.md
- * 10.7) -- only active_instance is implemented so far (what CLI mode needs);
- * the rest (last_screen, db_filter, ...) is UI-only, added when M7 needs it. ---- */
+ * 10.7): active_instance, last_screen, db_filter, db_sort. ---- */
+
+/* The caller frees the result; NULL if ui-state doesn't exist or has no
+ * such key set. Generic version of cfg_get_active_instance() below, for
+ * M7's other ui-state fields (last_screen, db_filter, db_sort). */
+char *cfg_get_ui_state(const char *key);
+
+/* Writes just `key`, preserving any other keys already in the file (so
+ * e.g. a CLI-mode "inst use" survives alongside the UI's own last_screen/
+ * db_filter/db_sort). `value` of "" is still written as `key = `. */
+nhp_err cfg_set_ui_state(const char *key, const char *value);
 
 /* The caller frees the result; NULL if ui-state doesn't exist or has no
  * active_instance set. */

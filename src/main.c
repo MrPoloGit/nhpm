@@ -11,6 +11,7 @@
 #include "sources.h"
 #include "stack.h"
 #include "ui/ui.h"
+#include "update.h"
 #include "util.h"
 
 #include <stdint.h>
@@ -85,6 +86,7 @@ static void print_usage(FILE *out)
                   "               [--version V] [--author A] [--target T] [--desc TEXT]\n"
                   "               [--long-desc TEXT] [--files F...]\n");
     (void)fprintf(out, "       nhpm export-patch <id>[@version] [FILE]\n");
+    (void)fprintf(out, "       nhpm update-check\n");
     (void)fprintf(out, "\n");
     (void)fprintf(out, "Run with no arguments to start the ncurses interface (docs/features.md\n");
     (void)fprintf(out, "section 13).\n");
@@ -117,10 +119,11 @@ static nhp_err init_logging(void)
     return NHP_OK;
 }
 
-static void refresh_progress(void *user_data, size_t page, size_t total_pages)
+static bool refresh_progress(void *user_data, size_t page, size_t total_pages)
 {
     (void)user_data;
     (void)printf("  page %zu/%zu\n", page, total_pages);
+    return false; /* the CLI has no interactive cancel; Ctrl-C already works */
 }
 
 static int cmd_refresh(void)
@@ -145,6 +148,36 @@ static int cmd_refresh(void)
 
     (void)printf("Done: %zu patches indexed.\n", idx.count);
     idx_free(&idx);
+    return 0;
+}
+
+static int cmd_update_check(void)
+{
+    cfg_app app;
+    cfg_app_defaults(&app);
+    if (cfg_app_load(&app) != NHP_OK) {
+        (void)fprintf(stderr, "nhpm: could not load the config file: %s\n", err_get());
+        /* Not fatal: carry on with defaults. */
+    }
+
+    update_check_result result;
+    nhp_err err = update_check(&app, /* force = */ true, &result);
+    cfg_app_free(&app);
+    if (err != NHP_OK) {
+        (void)fprintf(stderr, "nhpm: could not check for updates: %s\n", err_get());
+        return (err == NHP_ENET) ? 2 : 1;
+    }
+
+    if (result.latest_version == NULL) {
+        (void)printf("No nhpm releases found yet.\n");
+    } else if (result.update_available) {
+        (void)printf("A newer version is available: %s (you have %s)\n", result.latest_version,
+                     NHPM_VERSION);
+    } else {
+        (void)printf("nhpm %s is up to date (latest release: %s)\n", NHPM_VERSION,
+                     result.latest_version);
+    }
+    update_check_result_free(&result);
     return 0;
 }
 
@@ -2248,6 +2281,9 @@ static int run_cli(int argc, char **argv)
     if (str_eq(cmd, "export-patch")) {
         return cmd_export_patch(argc, argv);
     }
+    if (str_eq(cmd, "update-check")) {
+        return cmd_update_check();
+    }
 
     (void)fprintf(stderr, "nhpm: unknown or not-yet-implemented command '%s'\n", cmd);
     print_usage(stderr);
@@ -2259,6 +2295,19 @@ int main(int argc, char **argv)
     for (int i = 1; i < argc; i++) {
         if (str_eq(argv[i], "--version") || str_eq(argv[i], "-V")) {
             (void)printf("nhpm %s\n", NHPM_VERSION);
+            /* Cache-only: never touches the network, so --version stays
+             * instant even offline. A live check is `nhpm update-check`. */
+            cfg_app app;
+            cfg_app_defaults(&app);
+            (void)cfg_app_load(&app);
+            update_check_result update;
+            update_check_cached(app.update_check_max_age_days, &update);
+            if (update.checked && update.update_available) {
+                (void)printf("a newer version is available: %s (run 'nhpm update-check')\n",
+                             update.latest_version);
+            }
+            update_check_result_free(&update);
+            cfg_app_free(&app);
             return 0;
         }
         if (str_eq(argv[i], "--help") || str_eq(argv[i], "-h")) {

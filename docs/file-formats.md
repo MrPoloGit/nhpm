@@ -69,14 +69,25 @@ Every file is saved by writing to a temporary file in the same folder, `fsync`, 
 **`config`:**
 
 ```ini
-index_max_age_days = 7
-request_delay_ms   = 1000
-wayback_fallback   = yes
-max_download_mb    = 5
-author_name        = Your Name   # default author for patches you make
-ignore             = *.swp *.bak # extra patterns never included in made patches
-pager              = less
-editor             = vi          # $EDITOR wins if set
+index_max_age_days        = 7
+request_delay_ms          = 1000
+wayback_fallback          = yes
+max_download_mb           = 5
+check_updates             = yes  # nhpm-plan.md M8; "no" disables nhpm --version's notice too
+update_check_max_age_days = 3
+author_name               = Your Name   # default author for patches you make
+ignore                    = *.swp *.bak # extra patterns never included in made patches
+pager                     = less
+editor                    = vi          # $EDITOR wins if set
+```
+
+**`ui-state`** (section 10.7; any key missing or the whole file missing just means defaults):
+
+```ini
+active_instance = 367-colorful
+last_screen     = p              # a screen's nav_letter, not its name
+db_filter       = v:3.6
+db_sort         = rating:desc
 ```
 
 **`index.tsv`** (tabs, newlines and backslashes inside fields escaped as `\t`, `\n`, `\\`):

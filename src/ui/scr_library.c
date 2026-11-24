@@ -30,6 +30,12 @@ static size_t g_patch_count = 0;
 static inst_instance *g_instances = NULL;
 static size_t g_inst_count = 0;
 
+/* Loaded once on enter(), freed on leave() -- unlike g_patches/g_instances,
+ * not reloaded by reload()'s other callers, since none of them change a
+ * rating. Used only for `r:>=N`: a lib_patch carries no rating of its own. */
+static idx_index g_index;
+static bool g_index_loaded = false;
+
 /* One row per downloaded version, flattened from g_patches so the list
  * widget can scroll plain rows (section 13.9's F4 mockup: a patch's
  * later versions repeat under it with a blank Name column). */
@@ -61,6 +67,85 @@ typedef enum lib_sort_col {
 
 static lib_sort_col g_sort_col = LIB_SORT_NONE;
 static bool g_sort_desc = false;
+
+/* docs/features.md 10.7's library_folded: ids whose older versions
+ * collapse to just the named row, comma-separated like db_filter.
+ * Empty by default -- every patch unfolded, the 13.9 F4 mockup's view. */
+static char g_folded_csv[512] = "";
+
+static bool id_is_folded(const char *id)
+{
+    size_t idlen = strlen(id);
+    const char *p = g_folded_csv;
+    while (*p != '\0') {
+        const char *comma = strchr(p, ',');
+        size_t len = (comma != NULL) ? (size_t)(comma - p) : strlen(p);
+        if (len == idlen && strncmp(p, id, len) == 0) {
+            return true;
+        }
+        if (comma == NULL) {
+            break;
+        }
+        p = comma + 1;
+    }
+    return false;
+}
+
+/* Rebuilds g_folded_csv without `id`, then appends it back if `folded`,
+ * and persists the result to ui-state right away (same as db_filter/
+ * db_sort save on every change, not just on leaving the screen). */
+static void set_folded(const char *id, bool folded)
+{
+    buf rebuilt;
+    buf_init(&rebuilt);
+    const char *p = g_folded_csv;
+    while (*p != '\0') {
+        const char *comma = strchr(p, ',');
+        size_t len = (comma != NULL) ? (size_t)(comma - p) : strlen(p);
+        bool is_this_id = len == strlen(id) && strncmp(p, id, len) == 0;
+        if (!is_this_id && len > 0) {
+            if (rebuilt.len > 0) {
+                (void)buf_append(&rebuilt, ",", 1);
+            }
+            (void)buf_append(&rebuilt, p, len);
+        }
+        if (comma == NULL) {
+            break;
+        }
+        p = comma + 1;
+    }
+    if (folded) {
+        if (rebuilt.len > 0) {
+            (void)buf_append(&rebuilt, ",", 1);
+        }
+        (void)buf_append_str(&rebuilt, id);
+    }
+    char *text = buf_take(&rebuilt);
+    (void)snprintf(g_folded_csv, sizeof(g_folded_csv), "%s", (text != NULL) ? text : "");
+    free(text);
+    (void)cfg_set_ui_state("library_folded", g_folded_csv);
+}
+
+static void toggle_folded(const char *id)
+{
+    set_folded(id, !id_is_folded(id));
+}
+
+/* Loaded once per process, first enter() -- mirrors scr_db.c's own
+ * restore_ui_state_once() for db_filter/db_sort. */
+static void restore_folded_once(void)
+{
+    static bool restored = false;
+    if (restored) {
+        return;
+    }
+    restored = true;
+    char *saved = cfg_get_ui_state("library_folded");
+    if (saved != NULL) {
+        (void)snprintf(g_folded_csv, sizeof(g_folded_csv), "%s", saved);
+        free(saved);
+    }
+}
 
 /* The active instance's version, parsed once on enter() -- same idea as
  * scr_db.c's own g_inst_version, just comparing a lib_patch's target
@@ -131,6 +216,22 @@ static bool patch_matches_words(const lib_patch *p, const char *words)
     return all_match;
 }
 
+/* `p->id`'s rating as the site last reported it ("-" or a bare number,
+ * same shape as idx_entry.rating), or NULL if the index isn't loaded or
+ * has no entry for it (a local patch, or one not yet indexed). */
+static const char *find_rating(const char *id)
+{
+    if (!g_index_loaded) {
+        return NULL;
+    }
+    for (size_t i = 0; i < g_index.count; i++) {
+        if (str_eq(g_index.entries[i].id, id)) {
+            return g_index.entries[i].rating;
+        }
+    }
+    return NULL;
+}
+
 static bool patch_matches(const lib_patch *p, const idx_query *q)
 {
     if (q->exact_id != NULL && q->exact_id[0] != '\0' && !str_eq(p->id, q->exact_id)) {
@@ -145,6 +246,16 @@ static bool patch_matches(const lib_patch *p, const idx_query *q)
     if (q->author_contains != NULL && q->author_contains[0] != '\0' &&
         !str_contains_ci(p->author, q->author_contains)) {
         return false;
+    }
+    if (q->min_rating >= 0) {
+        /* Same semantics as index.c's entry_matches_query(): unrated (no
+         * digits at all, e.g. "-") or below the threshold both exclude. */
+        const char *rating = find_rating(p->id);
+        char *end = NULL;
+        long rating_value = (rating != NULL) ? strtol(rating, &end, 10) : 0;
+        if (rating == NULL || end == rating || rating_value < q->min_rating) {
+            return false;
+        }
     }
     return patch_matches_words(p, q->text);
 }
@@ -372,14 +483,20 @@ static void recompute_rows(void)
         if (!mk_filter_matches(mk_filter, compat_mark(p->target))) {
             continue;
         }
+        bool folded = id_is_folded(p->id) && p->version_count > 1;
+        bool shown_one = false;
         for (size_t v = 0; v < p->version_count; v++) {
             if (in_filter[0] != '\0' &&
                 !version_used_by(p->id, p->versions[v].version, in_filter)) {
                 continue;
             }
+            if (folded && shown_one) {
+                continue; /* older versions collapsed -- 'f' unfolds them */
+            }
             g_rows[n].patch_idx = i;
             g_rows[n].version_idx = v;
             n++;
+            shown_one = true;
         }
     }
     idx_query_free(&query);
@@ -418,6 +535,29 @@ static void reapply_sort_keep_selection(int visible)
     }
 }
 
+/* Like reapply_sort_keep_selection(), but for 'f': the exact version may
+ * no longer exist once its row count changes, so match on id alone, and
+ * clamp as a last resort (the toggled patch itself never disappears). */
+static void refold_keep_patch_selected(const char *id, int visible)
+{
+    recompute_rows();
+    for (size_t k = 0; k < g_row_count; k++) {
+        if (str_eq(g_patches[g_rows[k].patch_idx].id, id)) {
+            g_list.selected = k;
+            g_list.top = k;
+            ui_list_move(&g_list, 0, g_row_count, visible);
+            return;
+        }
+    }
+    if (g_row_count == 0) {
+        g_list.selected = 0;
+        g_list.top = 0;
+    } else if (g_list.selected >= g_row_count) {
+        g_list.selected = g_row_count - 1;
+        g_list.top = (g_list.top >= g_row_count) ? g_row_count - 1 : g_list.top;
+    }
+}
+
 static void reload(void)
 {
     free_lists();
@@ -429,8 +569,11 @@ static void reload(void)
 // cppcheck-suppress constParameterCallback -- must match ui_screen.enter's signature
 static void enter(ui_app *app)
 {
+    restore_folded_once();
     g_have_inst_version =
         app->active_loaded && ver_parse(app->active_inst.source, &g_inst_version) == NHP_OK;
+    idx_init(&g_index);
+    g_index_loaded = (idx_load(&g_index) == NHP_OK);
     reload();
 }
 
@@ -441,6 +584,10 @@ static void leave(ui_app *app)
     if (g_have_inst_version) {
         ver_free(&g_inst_version);
         g_have_inst_version = false;
+    }
+    if (g_index_loaded) {
+        idx_free(&g_index);
+        g_index_loaded = false;
     }
 }
 
@@ -492,10 +639,14 @@ static void draw_row(WINDOW *win, int y, int width, size_t index, bool selected,
     used_in_text(p->id, v->version, &used);
     char *used_text = buf_take(&used);
 
+    char version_col[40];
+    bool folded = id_is_folded(p->id) && p->version_count > 1;
+    (void)snprintf(version_col, sizeof(version_col), "%s%s", v->version, folded ? " (+)" : "");
+
     buf line;
     buf_init(&line);
-    buf_append_fmt(&line, "  %-26.26s %-9.9s %-7.7s %s", row->version_idx == 0 ? p->name : "",
-                   v->version, p->target[0] != '\0' ? p->target : "-",
+    buf_append_fmt(&line, "  %-26.26s %-13.13s %-7.7s %s", row->version_idx == 0 ? p->name : "",
+                   version_col, p->target[0] != '\0' ? p->target : "-",
                    used_text[0] != '\0' ? used_text : "-");
     char *text = buf_take(&line);
 
@@ -664,10 +815,20 @@ static void do_add(ui_app *app)
     if (err == NHP_OK) {
         set_action_status(app, "added %s %s to %s", p->id, v->version, app->active_inst.name);
     } else if (err == NHP_ECONFLICT) {
-        ui_show_conflict(app, &conflict);
-        set_action_status(app, "added %s %s to %s, disabled (conflicts with %s %s)", p->id,
-                          v->version, app->active_inst.name, conflict.patch_id,
-                          conflict.patch_version);
+        /* docs 11.6: "Add from library... then Enable", so the same
+         * Force/View/Cancel choice as enabling directly applies here. */
+        if (conflict.is_requested_patch &&
+            ui_resolve_conflict(app, &app->active_inst, new_index, &conflict)) {
+            set_action_status(app, "added %s %s to %s, forced on", p->id, v->version,
+                              app->active_inst.name);
+        } else {
+            if (!conflict.is_requested_patch) {
+                ui_show_conflict(app, &conflict);
+            }
+            set_action_status(app, "added %s %s to %s, disabled (conflicts with %s %s)", p->id,
+                              v->version, app->active_inst.name, conflict.patch_id,
+                              conflict.patch_version);
+        }
         stack_conflict_free(&conflict);
     } else if (err == NHP_EEXIST) {
         set_action_status(app, "%s is already in %s's stack -- see Patches (%s)", p->id,
@@ -902,8 +1063,9 @@ static void do_search(ui_app *app)
 {
     char search_text[256];
     (void)snprintf(search_text, sizeof(search_text), "%s", g_filter);
-    bool committed = ui_show_popup_input_live(app, "Search (v: a: id: in:<instance>)", search_text,
-                                              sizeof(search_text), draw, on_search_change);
+    bool committed =
+        ui_show_popup_input_live(app, "Search (v: a: r:>=N id: mk: in:<instance>)", search_text,
+                                 sizeof(search_text), draw, on_search_change);
     if (!committed) {
         g_filter[0] = '\0';
     } else {
@@ -992,14 +1154,29 @@ static bool handle_key(ui_app *app, wint_t ch)
         do_make_from_folder(app);
         return true;
     }
+    if (ch == L'f') {
+        if (g_row_count > 0) {
+            const lib_patch *p = &g_patches[g_rows[g_list.selected].patch_idx];
+            char id[160];
+            (void)snprintf(id, sizeof(id), "%s", p->id);
+            if (p->version_count > 1) {
+                toggle_folded(id);
+                refold_keep_patch_selected(id, visible);
+                set_action_status(app, "%s %s", id_is_folded(id) ? "folded" : "unfolded", id);
+            } else {
+                set_action_status(app, "%s has only one version -- nothing to fold", id);
+            }
+        }
+        return true;
+    }
     return false;
 }
 
 const ui_screen scr_library = {
     .name = "Library",
     .nav_letter = 'l',
-    .key_bar = "Tab/Left menu  / search  n/N next/prev  s/S sort  Enter view  a Add  x Del version "
-               " X Del patch  u Updates  i Import  m Make from folder",
+    .key_bar = "Tab/Left menu  / search  n/N next/prev  s/S sort  f fold  Enter view  a Add  x Del "
+               "version  X Del patch  u Updates  i Import  m Make from folder",
     .enter = enter,
     .leave = leave,
     .draw = draw,

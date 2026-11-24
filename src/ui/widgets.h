@@ -74,6 +74,11 @@ void ui_text_view_draw(const ui_text_view *view, WINDOW *win, int first_line, in
  * (height-2) rows by (width-2) columns, after calling this. */
 void ui_draw_panel(WINDOW *win, const char *title);
 
+/* The dedicated progress widget (13.5): a bar + `text` in the status
+ * line, repainted immediately like ui_flush_status() (13.6). `fraction`
+ * is 0.0-1.0; negative draws no bar, just `text` (total not yet known). */
+void ui_draw_progress(ui_app *app, double fraction, const char *text);
+
 /* A blocking y/N confirmation in the status line. 'y'/'Y' confirms;
  * anything else (including Enter and Esc) declines -- there's no key
  * that destroys something by accident. */

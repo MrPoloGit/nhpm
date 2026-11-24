@@ -38,10 +38,111 @@ typedef struct changes_backend {
     const char *default_target;
 } changes_backend;
 
+/* Per-file +/- counts and a short first-hunk preview (12.5's mockup) --
+ * computed once per dialog open, never per row: full_diff() rebuilds a
+ * whole comparison tree per call (12.3), far too slow to repeat. */
+typedef struct file_diff_stats {
+    int plus_count;
+    int minus_count;
+    char *snippet; /* owned; NULL if nothing parsed for this file */
+} file_diff_stats;
+
+static void file_diff_stats_free(file_diff_stats *stats, size_t count)
+{
+    if (stats == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < count; i++) {
+        free(stats[i].snippet);
+    }
+    free(stats);
+}
+
+/* The index into files[0..count) whose "a/<path>"/"b/<path>" matches the
+ * path on a "diff -Naur a/<path> b/<path>" header line, or -1. */
+static long find_file_index(const char *line, const mkp_file *files, size_t count)
+{
+    const char *marker = strstr(line, " a/");
+    if (marker == NULL) {
+        return -1;
+    }
+    const char *path_start = marker + 3;
+    const char *space = strchr(path_start, ' ');
+    size_t len = (space != NULL) ? (size_t)(space - path_start) : strlen(path_start);
+    for (size_t i = 0; i < count; i++) {
+        if (strlen(files[i].path) == len && strncmp(files[i].path, path_start, len) == 0) {
+            return (long)i;
+        }
+    }
+    return -1;
+}
+
+/* Fills stats[0..count) from one combined unified diff (each file's own
+ * "diff -Naur a/X b/X" line, run_diff()'s format, mkpatch.c): total +/-
+ * counts, and a snippet of just the first hunk, for the details pane. */
+static void parse_diff_stats(const char *diff_text, const mkp_file *files, size_t count,
+                             file_diff_stats *stats)
+{
+    if (diff_text == NULL) {
+        return;
+    }
+    long current = -1;
+    bool snippet_started = false;
+    int snippet_lines_left = 0;
+    buf snippet_buf;
+    buf_init(&snippet_buf);
+
+    const char *line = diff_text;
+    while (*line != '\0') {
+        const char *eol = strchr(line, '\n');
+        size_t len = (eol != NULL) ? (size_t)(eol - line) : strlen(line);
+
+        if (len >= 11 && strncmp(line, "diff -Naur ", 11) == 0) {
+            if (current >= 0 && snippet_started) {
+                stats[current].snippet = buf_take(&snippet_buf);
+            }
+            buf_init(&snippet_buf);
+            snippet_started = false;
+            snippet_lines_left = 0;
+            current = find_file_index(line, files, count);
+        } else if (current >= 0) {
+            bool is_plus =
+                len >= 1 && line[0] == '+' && !(len >= 3 && strncmp(line, "+++", 3) == 0);
+            bool is_minus =
+                len >= 1 && line[0] == '-' && !(len >= 3 && strncmp(line, "---", 3) == 0);
+            if (is_plus) {
+                stats[current].plus_count++;
+            } else if (is_minus) {
+                stats[current].minus_count++;
+            }
+            if (!snippet_started && len >= 2 && line[0] == '@' && line[1] == '@') {
+                snippet_started = true;
+                snippet_lines_left = 4;
+            }
+            if (snippet_started && snippet_lines_left > 0) {
+                (void)buf_append(&snippet_buf, line, len);
+                (void)buf_append(&snippet_buf, "\n", 1);
+                snippet_lines_left--;
+            }
+        }
+
+        if (eol == NULL) {
+            break;
+        }
+        line = eol + 1;
+    }
+    if (current >= 0 && snippet_started) {
+        stats[current].snippet = buf_take(&snippet_buf);
+    } else {
+        buf_free(&snippet_buf);
+    }
+}
+
 typedef struct changes_row_ctx {
     const mkp_file *files;
     const bool *ticked;
-    const size_t *visible_idx; /* maps a display row to its index into files/ticked */
+    const size_t *visible_idx;    /* maps a display row to its index into files/ticked */
+    const file_diff_stats *stats; /* parallel to files; NULL if not computed */
 } changes_row_ctx;
 
 static void draw_changes_row(WINDOW *win, int y, int width, size_t index, bool selected,
@@ -55,9 +156,21 @@ static void draw_changes_row(WINDOW *win, int y, int width, size_t index, bool s
 
     buf line;
     buf_init(&line);
-    buf_append_fmt(&line, "[%c] %s    %s%s%s", ctx->ticked[i] ? 'x' : ' ', status_letter(f->status),
-                   f->path, (f->status == MKP_BINARY) ? "  (binary, can't be included)" : "",
-                   f->hidden ? "  (hidden: build output)" : "");
+    buf_append_fmt(&line, "[%c] %s    %s", ctx->ticked[i] ? 'x' : ' ', status_letter(f->status),
+                   f->path);
+    if (f->status == MKP_BINARY) {
+        buf_append_str(&line, "  (binary, can't be included)");
+    } else if (ctx->stats != NULL) {
+        const file_diff_stats *s = &ctx->stats[i];
+        if (s->minus_count > 0) {
+            buf_append_fmt(&line, "  +%d -%d", s->plus_count, s->minus_count);
+        } else if (s->plus_count > 0) {
+            buf_append_fmt(&line, "  +%d", s->plus_count);
+        }
+    }
+    if (f->hidden) {
+        buf_append_str(&line, "  (hidden: build output)");
+    }
     char *text = buf_take(&line);
 
     if (selected) {
@@ -72,7 +185,7 @@ static void draw_changes_row(WINDOW *win, int y, int width, size_t index, bool s
 
 static void draw_changes_dialog(ui_app *app, const char *title, const mkp_file *files,
                                 const bool *ticked, const size_t *visible_idx, size_t visible_count,
-                                const ui_list *list)
+                                const file_diff_stats *stats, const ui_list *list)
 {
     WINDOW *w = app->layout.main_win;
     if (w == NULL) {
@@ -81,11 +194,49 @@ static void draw_changes_dialog(ui_app *app, const char *title, const mkp_file *
     (void)werase(w);
     ui_draw_panel(w, title);
     int inner_width = getmaxx(w) - 2;
-    (void)mvwaddnstr(w, 1, 1, "    Status  File", inner_width);
+    (void)mvwaddnstr(w, 1, 1, "    Status  File                                        +/-",
+                     inner_width);
 
     int inner_height = getmaxy(w) - 2;
-    changes_row_ctx ctx = {.files = files, .ticked = ticked, .visible_idx = visible_idx};
+    changes_row_ctx ctx = {
+        .files = files, .ticked = ticked, .visible_idx = visible_idx, .stats = stats};
     ui_list_draw(list, w, 2, inner_height - 1, inner_width, visible_count, draw_changes_row, &ctx);
+    (void)wnoutrefresh(w);
+}
+
+/* The selected row's own snippet (docs 12.5's mockup), in the same
+ * Details pane every other screen uses -- unused while this dialog runs
+ * from its main loop, so there's nothing else wanting it meanwhile. */
+static void draw_changes_details(ui_app *app, const file_diff_stats *stats,
+                                 const size_t *visible_idx, size_t selected, size_t visible_count)
+{
+    WINDOW *w = app->layout.details;
+    if (w == NULL) {
+        return;
+    }
+    (void)werase(w);
+    ui_draw_panel(w, "Diff");
+    if (stats != NULL && selected < visible_count) {
+        const char *snippet = stats[visible_idx[selected]].snippet;
+        int inner_width = getmaxx(w) - 2;
+        int inner_height = getmaxy(w) - 2;
+        if (snippet != NULL) {
+            int row = 1;
+            const char *p = snippet;
+            while (*p != '\0' && row <= inner_height) {
+                const char *eol = strchr(p, '\n');
+                size_t len = (eol != NULL) ? (size_t)(eol - p) : strlen(p);
+                (void)mvwaddnstr(w, row, 1, p, (int)len < inner_width ? (int)len : inner_width);
+                row++;
+                if (eol == NULL) {
+                    break;
+                }
+                p = eol + 1;
+            }
+        } else {
+            (void)mvwaddnstr(w, 1, 1, "(no textual change to preview)", inner_width);
+        }
+    }
     (void)wnoutrefresh(w);
 }
 
@@ -268,6 +419,24 @@ static void run_changes_dialog(ui_app *app, const char *title, mkp_file *files, 
         }
     }
 
+    /* Per-row +/- counts and the Details pane's snippet (12.5): one
+     * combined diff of every non-binary file, parsed once up front --
+     * never recomputed per row, see parse_diff_stats()'s own comment. */
+    file_diff_stats *stats = (count > 0) ? calloc(count, sizeof(*stats)) : NULL;
+    if (stats != NULL) {
+        size_t all_count = 0;
+        char **all_paths = collect_paths(files, NULL, count, false, &all_count);
+        if (all_count > 0) {
+            char *diff_text = NULL;
+            if (backend->full_diff(backend->user_data, (const char *const *)all_paths, all_count,
+                                   &diff_text) == NHP_OK) {
+                parse_diff_stats(diff_text, files, count, stats);
+            }
+            free(diff_text);
+        }
+        free(all_paths);
+    }
+
     ui_list list;
     ui_list_init(&list);
     app->text_input_active = true;
@@ -277,7 +446,8 @@ static void run_changes_dialog(ui_app *app, const char *title, mkp_file *files, 
      * already fixed elsewhere. Scoped to this call, not a file static. */
     char action_status[256] = "";
     while (!done) {
-        draw_changes_dialog(app, title, files, ticked, visible_idx, visible_count, &list);
+        draw_changes_dialog(app, title, files, ticked, visible_idx, visible_count, stats, &list);
+        draw_changes_details(app, stats, visible_idx, list.selected, visible_count);
         size_t ticked_count = 0;
         for (size_t i = 0; i < count; i++) {
             if (ticked[i]) {
@@ -387,6 +557,7 @@ static void run_changes_dialog(ui_app *app, const char *title, mkp_file *files, 
     }
 
     app->text_input_active = false;
+    file_diff_stats_free(stats, count);
     free(visible_idx);
     free(ticked);
 }

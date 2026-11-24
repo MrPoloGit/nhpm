@@ -53,6 +53,55 @@ typedef enum db_sort_col {
 static db_sort_col g_sort_col = DB_SORT_NONE;
 static bool g_sort_desc = false;
 
+static const char *const DB_SORT_NAMES[DB_SORT_COUNT] = {"none", "name",   "author",
+                                                         "for",  "rating", "id"};
+
+/* docs/features.md 10.7: db_filter/db_sort in ui-state. Called after
+ * do_search() commits (not on_search_change()'s live preview -- that
+ * would mean a disk write per keystroke) and after 's'/'S'. */
+static void save_ui_state(void)
+{
+    (void)cfg_set_ui_state("db_filter", g_filter);
+    char value[32];
+    (void)snprintf(value, sizeof(value), "%s:%s", DB_SORT_NAMES[g_sort_col],
+                   g_sort_desc ? "desc" : "asc");
+    (void)cfg_set_ui_state("db_sort", value);
+}
+
+/* Loaded once per process, on the first enter() -- re-entering the screen
+ * later in the same session keeps whatever the user set, rather than
+ * reverting to what was on disk at startup. */
+static void restore_ui_state_once(void)
+{
+    static bool restored = false;
+    if (restored) {
+        return;
+    }
+    restored = true;
+
+    char *filter = cfg_get_ui_state("db_filter");
+    if (filter != NULL) {
+        (void)snprintf(g_filter, sizeof(g_filter), "%s", filter);
+        free(filter);
+    }
+
+    char *sort = cfg_get_ui_state("db_sort");
+    if (sort != NULL) {
+        char *colon = strchr(sort, ':');
+        if (colon != NULL) {
+            *colon = '\0';
+            g_sort_desc = str_eq(colon + 1, "desc");
+        }
+        for (size_t i = 0; i < DB_SORT_COUNT; i++) {
+            if (str_eq(sort, DB_SORT_NAMES[i])) {
+                g_sort_col = (db_sort_col)i;
+                break;
+            }
+        }
+        free(sort);
+    }
+}
+
 /* The F3 mockup's `v` "All versions" -- off by default, collapsing every
  * downloaded version but the newest into a "(+)" suffix the way the
  * Downloaded column already did; on, it lists every one. */
@@ -325,6 +374,7 @@ static void reload_index(void)
 // cppcheck-suppress constParameterCallback -- must match ui_screen.enter's signature
 static void enter(ui_app *app)
 {
+    restore_ui_state_once();
     g_have_inst_version =
         app->active_loaded && ver_parse(app->active_inst.source, &g_inst_version) == NHP_OK;
     free_instances();
@@ -519,8 +569,7 @@ static void draw(ui_app *app)
 
     char state[96] = "";
     if (g_sort_col != DB_SORT_NONE) {
-        static const char *names[DB_SORT_COUNT] = {"none", "name", "author", "for", "rating",
-                                                    "id"};
+        static const char *names[DB_SORT_COUNT] = {"none", "name", "author", "for", "rating", "id"};
         (void)snprintf(state, sizeof(state), ", sorted by %s %s", names[g_sort_col],
                        g_sort_desc ? "desc" : "asc");
     }
@@ -553,11 +602,28 @@ static void set_action_status(ui_app *app, const char *fmt, ...)
     ui_set_status(app, "%s", g_action_status);
 }
 
-static void progress(void *user_data, size_t page, size_t total_pages)
+/* Esc/`q` cancels (13.6) -- `q` also flags quit_requested, same reasoning
+ * as scr_build.c's on_build_line(): normal key handling is blocked
+ * during the refresh, so `q` wouldn't otherwise exit immediately. */
+static bool progress(void *user_data, size_t page, size_t total_pages)
 {
     ui_app *app = user_data;
-    ui_set_status(app, "refreshing index: page %zu/%zu...", page, total_pages);
-    ui_flush_status(app);
+    char text[64];
+    (void)snprintf(text, sizeof(text), "refreshing index: page %zu/%zu...", page, total_pages);
+    double fraction = (total_pages > 0) ? (double)page / (double)total_pages : -1.0;
+    ui_draw_progress(app, fraction, text);
+
+    (void)nodelay(stdscr, TRUE);
+    wint_t ch = 0;
+    int r = wget_wch(stdscr, &ch);
+    (void)nodelay(stdscr, FALSE);
+    if (r != ERR && (ch == 27 || ch == L'q')) {
+        if (ch != 27) {
+            app->quit_requested = true;
+        }
+        return true;
+    }
+    return false;
 }
 
 static void do_refresh(ui_app *app)
@@ -565,6 +631,10 @@ static void do_refresh(ui_app *app)
     ui_set_status(app, "refreshing index...");
     ui_flush_status(app);
     nhp_err err = idx_refresh(&g_index, &app->config, progress, app);
+    if (err == NHP_ECANCELED) {
+        set_action_status(app, "refresh canceled");
+        return;
+    }
     if (err != NHP_OK) {
         set_action_status(app, "could not refresh: %s", err_get());
         return;
@@ -701,10 +771,20 @@ static void do_download(ui_app *app, bool add_to_instance)
     if (err == NHP_OK) {
         set_action_status(app, "added %s %s to %s", entry->id, version, app->active_inst.name);
     } else if (err == NHP_ECONFLICT) {
-        ui_show_conflict(app, &conflict);
-        set_action_status(app, "added %s %s to %s, disabled (conflicts with %s %s)", entry->id,
-                          version, app->active_inst.name, conflict.patch_id,
-                          conflict.patch_version);
+        /* docs 11.6: "Add from library... then Enable", so the same
+         * Force/View/Cancel choice as enabling directly applies here. */
+        if (conflict.is_requested_patch &&
+            ui_resolve_conflict(app, &app->active_inst, new_index, &conflict)) {
+            set_action_status(app, "added %s %s to %s, forced on", entry->id, version,
+                              app->active_inst.name);
+        } else {
+            if (!conflict.is_requested_patch) {
+                ui_show_conflict(app, &conflict);
+            }
+            set_action_status(app, "added %s %s to %s, disabled (conflicts with %s %s)", entry->id,
+                              version, app->active_inst.name, conflict.patch_id,
+                              conflict.patch_version);
+        }
         stack_conflict_free(&conflict);
     } else if (err == NHP_EEXIST) {
         set_action_status(app, "%s is already in %s's stack -- see Patches (%s)", entry->id,
@@ -767,6 +847,7 @@ static void do_search(ui_app *app)
         (void)snprintf(g_filter, sizeof(g_filter), "%s", search_text);
     }
     recompute_results();
+    save_ui_state();
 }
 
 static bool handle_key(ui_app *app, wint_t ch)
@@ -814,11 +895,13 @@ static bool handle_key(ui_app *app, wint_t ch)
     if (ch == L's') {
         g_sort_col = (db_sort_col)((g_sort_col + 1) % DB_SORT_COUNT);
         reapply_sort_keep_selection(visible);
+        save_ui_state();
         return true;
     }
     if (ch == L'S') {
         g_sort_desc = !g_sort_desc;
         reapply_sort_keep_selection(visible);
+        save_ui_state();
         return true;
     }
     if (ch == L'v') {

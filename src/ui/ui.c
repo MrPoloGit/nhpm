@@ -4,6 +4,7 @@
 #include "ui.h"
 
 #include "build.h"
+#include "proc.h"
 #include "screen.h"
 #include "widgets.h"
 
@@ -260,7 +261,9 @@ bool ui_require_write_access(ui_app *app)
     return true;
 }
 
-void ui_show_conflict(ui_app *app, const stack_conflict *conflict)
+/* Shared by ui_show_conflict() and ui_resolve_conflict()'s own "View" --
+ * the caller frees the result. NULL only on NHP_ENOMEM. */
+static char *conflict_detail_text(const stack_conflict *conflict)
 {
     buf detail;
     buf_init(&detail);
@@ -268,18 +271,211 @@ void ui_show_conflict(ui_app *app, const stack_conflict *conflict)
         &detail, "%s %s does not apply cleanly%s\n", conflict->patch_id, conflict->patch_version,
         conflict->is_requested_patch ? "" : " (a later patch in the stack depends on it)");
     for (size_t i = 0; i < conflict->file_count; i++) {
-        buf_append_fmt(&detail, "  %-30s hunk %d of %d FAILED\n", conflict->files[i].path,
-                       conflict->files[i].hunks_failed, conflict->files[i].hunks_total);
+        if (conflict->files[i].hunks_failed > 0) {
+            buf_append_fmt(&detail, "  %-30s hunk %d of %d FAILED\n", conflict->files[i].path,
+                           conflict->files[i].hunks_failed, conflict->files[i].hunks_total);
+        } else {
+            buf_append_fmt(&detail, "  %-30s %d hunks OK\n", conflict->files[i].path,
+                           conflict->files[i].hunks_total);
+        }
     }
     if (conflict->quilt_output != NULL && conflict->quilt_output[0] != '\0') {
         buf_append_str(&detail, "\n--- quilt output ---\n");
         buf_append_str(&detail, conflict->quilt_output);
     }
-    char *text = buf_take(&detail);
+    return buf_take(&detail);
+}
+
+void ui_show_conflict(ui_app *app, const stack_conflict *conflict)
+{
+    char *text = conflict_detail_text(conflict);
     if (text != NULL) {
         ui_show_text_dialog(app, "Conflict", text);
         free(text);
     }
+}
+
+nhp_err ui_run_editor(ui_app *app, const char *const *paths, size_t count)
+{
+    const char *editor = getenv("EDITOR");
+    if (editor == NULL || editor[0] == '\0') {
+        editor = app->config.editor;
+    }
+    if (editor == NULL || editor[0] == '\0') {
+        editor = "vi";
+    }
+
+    char **editor_tokens = NULL;
+    size_t editor_token_count = 0;
+    nhp_err err = str_split_whitespace(editor, &editor_tokens, &editor_token_count);
+    if (err != NHP_OK) {
+        return err;
+    }
+    if (editor_token_count == 0) {
+        str_tokens_free(editor_tokens, editor_token_count);
+        err_set("no editor configured");
+        return NHP_EINVAL;
+    }
+
+    size_t argc = editor_token_count + count;
+    const char **argv = malloc((argc + 1) * sizeof(*argv));
+    if (argv == NULL) {
+        str_tokens_free(editor_tokens, editor_token_count);
+        return NHP_ENOMEM;
+    }
+    size_t n = 0;
+    for (size_t i = 0; i < editor_token_count; i++) {
+        argv[n++] = editor_tokens[i];
+    }
+    for (size_t i = 0; i < count; i++) {
+        argv[n++] = paths[i];
+    }
+    argv[n] = NULL;
+
+    def_prog_mode();
+    (void)endwin();
+    bool signaled = false;
+    int code = 0;
+    err = proc_run_interactive(argv, NULL, NULL, &signaled, &code);
+    (void)reset_prog_mode();
+    (void)clearok(curscr, TRUE);
+    (void)refresh();
+
+    free(argv);
+    str_tokens_free(editor_tokens, editor_token_count);
+    return err;
+}
+
+/* The files with failed hunks, and each one's ".rej" counterpart, as
+ * absolute paths -- the only ones worth $EDITOR after a Force (docs
+ * 11.6). *out_count is always even; free each path and the array. */
+static char **force_edit_paths(const char *src_dir, const stack_conflict *conflict,
+                               size_t *out_count)
+{
+    *out_count = 0;
+    size_t failed = 0;
+    for (size_t i = 0; i < conflict->file_count; i++) {
+        if (conflict->files[i].hunks_failed > 0) {
+            failed++;
+        }
+    }
+    if (failed == 0) {
+        return NULL;
+    }
+
+    char **paths = calloc(failed * 2, sizeof(*paths));
+    if (paths == NULL) {
+        return NULL;
+    }
+    size_t n = 0;
+    for (size_t i = 0; i < conflict->file_count; i++) {
+        if (conflict->files[i].hunks_failed == 0) {
+            continue;
+        }
+        char *abs = path_join(src_dir, conflict->files[i].path);
+        if (abs == NULL) {
+            for (size_t j = 0; j < n; j++) {
+                free(paths[j]);
+            }
+            free(paths);
+            return NULL;
+        }
+        buf rej_buf;
+        buf_init(&rej_buf);
+        buf_append_fmt(&rej_buf, "%s.rej", abs);
+        char *rej = buf_take(&rej_buf);
+        paths[n++] = abs;
+        if (rej == NULL) {
+            for (size_t j = 0; j < n; j++) {
+                free(paths[j]);
+            }
+            free(paths);
+            return NULL;
+        }
+        paths[n++] = rej;
+    }
+    *out_count = n;
+    return paths;
+}
+
+/* docs/features.md 11.6's Force: force-pushes the patch at `index`, hands
+ * $EDITOR every file its hunks failed in plus its .rej, then refreshes
+ * and saves. A failed step still leaves the force-push standing. */
+static bool do_force(ui_app *app, inst_instance *inst, size_t index, const char *patch_id)
+{
+    stack_conflict force_conflict;
+    nhp_err err = stack_force_begin(inst, index, &force_conflict);
+    if (err != NHP_OK) {
+        ui_set_status(app, "could not force %s: %s", patch_id, err_get());
+        return false;
+    }
+
+    char *src_dir = inst_source_full_path(inst);
+    size_t path_count = 0;
+    char **paths =
+        (src_dir != NULL) ? force_edit_paths(src_dir, &force_conflict, &path_count) : NULL;
+    free(src_dir);
+
+    nhp_err editor_err = NHP_OK;
+    if (path_count > 0) {
+        editor_err = ui_run_editor(app, (const char *const *)paths, path_count);
+    }
+    for (size_t i = 0; i < path_count; i++) {
+        free(paths[i]);
+    }
+    free(paths);
+    stack_conflict_free(&force_conflict);
+
+    if (editor_err != NHP_OK) {
+        ui_set_status(app, "%s is force-pushed with .rej files, but the editor failed: %s",
+                      patch_id, err_get());
+        return false;
+    }
+
+    err = stack_force_finish(inst, index);
+    if (err != NHP_OK) {
+        ui_set_status(app, "%s is force-pushed, but could not refresh/save it: %s", patch_id,
+                      err_get());
+        return false;
+    }
+    ui_set_status(app, "%s forced on and marked modified", patch_id);
+    return true;
+}
+
+bool ui_resolve_conflict(ui_app *app, inst_instance *inst, size_t index,
+                         const stack_conflict *conflict)
+{
+    char *patch_id = str_dup(conflict->patch_id);
+    char *detail = NULL;
+    bool forced = false;
+    for (;;) {
+        static const char *const OPTIONS[] = {"Force", "View failing hunks", "Cancel"};
+        char title[160];
+        (void)snprintf(title, sizeof(title), "%s %s does not apply cleanly", conflict->patch_id,
+                       conflict->patch_version);
+        size_t choice = NHP_ARRAY_LEN(OPTIONS) - 1; /* Esc behaves like Cancel */
+        (void)ui_show_popup_menu(app, title, OPTIONS, NHP_ARRAY_LEN(OPTIONS), &choice,
+                                 current_screen(app)->draw);
+
+        if (choice == 1) { /* View */
+            if (detail == NULL) {
+                detail = conflict_detail_text(conflict);
+            }
+            if (detail != NULL) {
+                ui_show_text_dialog(app, "Conflict", detail);
+            }
+            continue; /* back to Force/View/Cancel */
+        }
+        if (choice == 0) { /* Force */
+            forced = do_force(app, inst, index, patch_id);
+        } else { /* Cancel */
+            ui_set_status(app, "%s left as it was", patch_id);
+        }
+        break;
+    }
+    free(detail);
+    free(patch_id);
+    return forced;
 }
 
 /* Role-based color pairs (docs/features.md section 13.8); monochrome
@@ -526,6 +722,30 @@ static void switch_to(ui_app *app, size_t index)
     if (next->enter != NULL) {
         next->enter(app);
     }
+    /* docs/features.md 10.7: persisted so the next start reopens on the
+     * same screen. Best-effort -- a failed write here shouldn't block
+     * switching screens, so the error is just dropped. */
+    const char letter[2] = {(char)next->nav_letter, '\0'};
+    (void)cfg_set_ui_state("last_screen", letter);
+}
+
+/* The screen whose nav_letter matches ui-state's last_screen, or 0
+ * (Instances) if there's no saved state or it names an unknown letter. */
+static size_t initial_screen_index(void)
+{
+    char *last_screen = cfg_get_ui_state("last_screen");
+    if (last_screen == NULL) {
+        return 0;
+    }
+    size_t index = 0;
+    for (size_t i = 0; i < NHP_ARRAY_LEN(g_screens); i++) {
+        if (last_screen[0] == (char)g_screens[i]->nav_letter && last_screen[1] == '\0') {
+            index = i;
+            break;
+        }
+    }
+    free(last_screen);
+    return index;
 }
 
 /* Hands the terminal to another program and takes it back afterward
@@ -660,7 +880,7 @@ nhp_err ui_run(bool debug)
      * creates them, that still blocks on input, just invisibly. */
     relayout(&g_app);
     ui_reload_active_instance(&g_app);
-    g_app.screen_index = 0;
+    g_app.screen_index = (int)initial_screen_index();
     const ui_screen *screen = current_screen(&g_app);
     if (screen->enter != NULL) {
         screen->enter(&g_app);

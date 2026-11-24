@@ -5,7 +5,6 @@
 
 #include "library.h"
 #include "mkpatch.h"
-#include "proc.h"
 #include "stack.h"
 #include "version.h"
 #include "widgets.h"
@@ -450,48 +449,6 @@ static void do_diff(ui_app *app)
     free(data);
 }
 
-/* Resolves the editor ($EDITOR, then config's `editor`, else "vi") and execs
- * it on `path`; caller hands over the real terminal first (13.7). Splits on
- * whitespace, no quoting, like other small command lines. */
-static nhp_err run_editor(const cfg_app *config, const char *path)
-{
-    const char *editor = getenv("EDITOR");
-    if (editor == NULL || editor[0] == '\0') {
-        editor = config->editor;
-    }
-    if (editor == NULL || editor[0] == '\0') {
-        editor = "vi";
-    }
-
-    char *copy = str_dup(editor);
-    if (copy == NULL) {
-        return NHP_ENOMEM;
-    }
-
-    const char *argv[18];
-    size_t n = 0;
-    char *saveptr = NULL;
-    const char *tok = strtok_r(copy, " \t", &saveptr);
-    while (tok != NULL && n < 16) {
-        argv[n++] = tok;
-        tok = strtok_r(NULL, " \t", &saveptr);
-    }
-    if (n == 0) {
-        free(copy);
-        err_set("no editor configured");
-        return NHP_EINVAL;
-    }
-    argv[n++] = path; /* n is at most 16 here, so this and the next line land on 16/17 of 18 */
-    // cppcheck-suppress arrayIndexOutOfBoundsCond -- false positive: n <= 17 here, argv[18] holds
-    argv[n] = NULL;
-
-    bool signaled = false;
-    int code = 0;
-    nhp_err err = proc_run_interactive(argv, NULL, NULL, &signaled, &code);
-    free(copy);
-    return err;
-}
-
 /* docs/features.md 12.3's "o": pick a file, track it into whatever
  * patch is on top (best-effort -- harmless if nothing's on top; Capture
  * ("w") finds the change either way), then hand the terminal to $EDITOR. */
@@ -515,12 +472,8 @@ static void do_open_editor(ui_app *app)
         return;
     }
 
-    def_prog_mode();
-    (void)endwin();
-    nhp_err err = run_editor(&app->config, full_path);
-    (void)reset_prog_mode();
-    (void)clearok(curscr, TRUE);
-    (void)refresh();
+    const char *paths[] = {full_path};
+    nhp_err err = ui_run_editor(app, paths, 1);
     free(full_path);
 
     if (err != NHP_OK) {
@@ -756,9 +709,9 @@ static void do_search(ui_app *app)
 {
     char search_text[256];
     (void)snprintf(search_text, sizeof(search_text), "%s", g_filter);
-    bool committed = ui_show_popup_input_live(app, "Search (highlights matches; n jumps)",
-                                              search_text, sizeof(search_text), draw,
-                                              on_search_change);
+    bool committed =
+        ui_show_popup_input_live(app, "Search (highlights matches; n jumps)", search_text,
+                                 sizeof(search_text), draw, on_search_change);
     (void)snprintf(g_filter, sizeof(g_filter), "%s", committed ? search_text : "");
 }
 
@@ -890,7 +843,17 @@ static bool handle_key(ui_app *app, wint_t ch)
             refresh_caches(app);
             ui_set_status(app, "%s %s", was_enabled ? "disabled" : "enabled", id);
         } else if (err == NHP_ECONFLICT) {
-            ui_show_conflict(app, &conflict);
+            /* Force only makes sense on the patch being enabled (docs
+             * 11.6); disabling has no "force", nor does a later patch
+             * broken by this one (!is_requested_patch). */
+            if (!was_enabled && conflict.is_requested_patch) {
+                if (ui_resolve_conflict(app, &app->active_inst, index, &conflict)) {
+                    ui_reload_active_instance(app);
+                    refresh_caches(app);
+                }
+            } else {
+                ui_show_conflict(app, &conflict);
+            }
             stack_conflict_free(&conflict);
         } else {
             ui_set_status(app, "could not change %s: %s", id, err_get());
