@@ -91,11 +91,11 @@ static void test_str_matches_all_words(void)
 {
     const char *fields[] = {"367-colorful", "nethack-3.6-linux", "streaming setup"};
 
-    CHECK(str_matches_all_words("", fields, 3));    /* empty filter: always matches */
-    CHECK(str_matches_all_words(NULL, fields, 3));  /* NULL filter: same */
+    CHECK(str_matches_all_words("", fields, 3));   /* empty filter: always matches */
+    CHECK(str_matches_all_words(NULL, fields, 3)); /* NULL filter: same */
     CHECK(str_matches_all_words("color", fields, 3));
-    CHECK(str_matches_all_words("COLOR", fields, 3)); /* case-insensitive */
-    CHECK(str_matches_all_words("linux stream", fields, 3)); /* each word, any field */
+    CHECK(str_matches_all_words("COLOR", fields, 3));                  /* case-insensitive */
+    CHECK(str_matches_all_words("linux stream", fields, 3));           /* each word, any field */
     CHECK(!str_matches_all_words("linux nonexistentword", fields, 3)); /* one word fails */
     CHECK(!str_matches_all_words("zzz", fields, 3));
 

@@ -161,9 +161,8 @@ static nhp_err run_unix_recipe(const char *src_dir, const char *install_dir, con
 /* docs/features.md 10.6's `custom` recipe: splits `commands`
  * (instance.conf's `custom_commands`) and runs each in order, stopping at
  * the first failure. NHP_EINVAL if there are none. */
-static nhp_err run_custom_recipe(const char *src_dir, const char *install_dir,
-                                 const char *commands, proc_line_fn on_line, void *user_data,
-                                 buf *log)
+static nhp_err run_custom_recipe(const char *src_dir, const char *install_dir, const char *commands,
+                                 proc_line_fn on_line, void *user_data, buf *log)
 {
     if (commands == NULL || commands[0] == '\0') {
         err_set("recipe 'custom' has no custom_commands set in instance.conf");
@@ -193,8 +192,8 @@ static nhp_err run_custom_recipe(const char *src_dir, const char *install_dir,
                 step++;
                 char label[32];
                 (void)snprintf(label, sizeof(label), "custom step %d", step);
-                err = run_build_step(src_dir, (const char *const *)argv, label, on_line,
-                                     user_data, log);
+                err = run_build_step(src_dir, (const char *const *)argv, label, on_line, user_data,
+                                     log);
                 free(argv);
             }
         }
@@ -260,9 +259,8 @@ nhp_err build_run(inst_instance *inst, proc_line_fn on_line, void *user_data)
 
     buf log;
     buf_init(&log);
-    nhp_err err =
-        run_recipe(inst->recipe, src_dir, install_dir, inst->make_vars, inst->custom_commands,
-                  on_line, user_data, &log);
+    nhp_err err = run_recipe(inst->recipe, src_dir, install_dir, inst->make_vars,
+                             inst->custom_commands, on_line, user_data, &log);
 
     char *log_text = buf_take(&log);
     char *log_path = path_join(inst_dir_path, "build.log");

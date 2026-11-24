@@ -44,8 +44,8 @@ static void recompute_visible(void)
         return;
     }
     for (size_t i = 0; i < g_count; i++) {
-        const char *fields[] = {g_instances[i].name, g_instances[i].source,
-                                g_instances[i].recipe, g_instances[i].notes};
+        const char *fields[] = {g_instances[i].name, g_instances[i].source, g_instances[i].recipe,
+                                g_instances[i].notes};
         if (str_matches_all_words(g_filter, fields, 4)) {
             g_visible[g_visible_count++] = &g_instances[i];
         }
@@ -868,9 +868,9 @@ static void do_search(ui_app *app)
 {
     char search_text[256];
     (void)snprintf(search_text, sizeof(search_text), "%s", g_filter);
-    bool committed = ui_show_popup_input_live(app, "Search (name, version, recipe, notes)",
-                                              search_text, sizeof(search_text), draw,
-                                              on_search_change);
+    bool committed =
+        ui_show_popup_input_live(app, "Search (name, version, recipe, notes)", search_text,
+                                 sizeof(search_text), draw, on_search_change);
     (void)snprintf(g_filter, sizeof(g_filter), "%s", committed ? search_text : "");
     recompute_visible();
 }

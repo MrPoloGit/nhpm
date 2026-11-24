@@ -231,8 +231,8 @@ static void test_add_rejects_duplicate_id(void)
         CHECK(inst.patch_count == 1);
 
         /* same id, enabled slot already exists */
-        nhp_err err = stack_add(&inst, "t01", "1.0", "Lamp Radius", p01, "abc", true, &idx,
-                                &conflict);
+        nhp_err err =
+            stack_add(&inst, "t01", "1.0", "Lamp Radius", p01, "abc", true, &idx, &conflict);
         CHECK(err == NHP_EEXIST);
         CHECK(inst.patch_count == 1); /* nothing appended */
         free(p01);
