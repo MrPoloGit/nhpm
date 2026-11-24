@@ -177,7 +177,7 @@ static nhp_err run_custom_recipe(const char *src_dir, const char *install_dir, c
     nhp_err err = NHP_OK;
     int step = 0;
     char *saveptr = NULL;
-    char *line = strtok_r(copy, ";", &saveptr);
+    const char *line = strtok_r(copy, ";", &saveptr);
     while (line != NULL && err == NHP_OK) {
         char **tokens = NULL;
         size_t count = 0;

@@ -310,7 +310,7 @@ static bool mk_filter_matches(const char *filter, char mark)
     if (filter[0] == '\0') {
         return true;
     }
-    if (filter[0] != '\0' && filter[1] == '\0') {
+    if (filter[1] == '\0') {
         return filter[0] == mark;
     }
     if (strcasecmp(filter, "exact") == 0) {

@@ -131,6 +131,7 @@ static void draw(ui_app *app)
     (void)wnoutrefresh(w);
 }
 
+// cppcheck-suppress constParameterCallback -- must match ui_screen.handle_key's signature
 static bool handle_key(ui_app *app, wint_t ch)
 {
     int visible = visible_rows(app);

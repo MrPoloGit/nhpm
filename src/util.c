@@ -24,7 +24,7 @@ void err_set(const char *fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-    vsnprintf(g_err_buf, sizeof(g_err_buf), fmt, ap);
+    (void)vsnprintf(g_err_buf, sizeof(g_err_buf), fmt, ap);
     va_end(ap);
 }
 
@@ -354,7 +354,7 @@ bool buf_append_fmt(buf *b, const char *fmt, ...)
         va_end(ap_copy);
         return false;
     }
-    vsnprintf(b->data + b->len, (size_t)needed + 1, fmt, ap_copy);
+    (void)vsnprintf(b->data + b->len, (size_t)needed + 1, fmt, ap_copy);
     va_end(ap_copy);
     b->len += (size_t)needed;
     return true;

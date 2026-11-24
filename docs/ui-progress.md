@@ -341,3 +341,20 @@ or `m` on Library
       above
 
 ## Issues
+
+- [ ] `clang-tidy` doesn't actually run as part of local `make lint` in every dev
+      environment: the Makefile only invokes it if the plain `clang-tidy` binary resolves on
+      `PATH`, which isn't true on a system that only installed a versioned one (e.g.
+      `clang-tidy-18`) -- it silently prints "clang-tidy not found locally; it runs in CI"
+      instead. Running it directly (`clang-tidy-18 $(find src -name '*.c') -p build`) surfaces
+      a pre-existing backlog, not specific to any one change:
+  - `readability-identifier-naming`: every `scr_*`/`g_*` global (in `src/ui/`) is flagged as
+    wanting `UPPER_CASE`, which conflicts with this project's actual, deliberate naming
+    convention for these identifiers -- the check's config likely needs an exemption rather
+    than the code needing renaming.
+  - `readability-function-size`: `ui_run` (`ui.c`), `ui_show_text_dialog`,
+    `ui_show_popup_menu`, `popup_input_loop` (all `widgets.c`) exceed the 80-line threshold.
+  - `bugprone-branch-clone` in `update.c`'s `update_check()` (the 404 and fallback `else`
+    branches both just set `latest = str_dup("")`).
+  - `clang-analyzer-valist.Uninitialized` false positives on `vsnprintf`/`vfprintf` calls in
+    `util.c` that pass an already-`va_start()`'d list (analyzer limitation, not a real bug).
