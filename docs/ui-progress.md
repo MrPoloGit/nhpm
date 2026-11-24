@@ -15,20 +15,31 @@ planned to working, move it here instead of leaving the gap implicit.
 - [x] Color pairs by role (header/selected/ok/warn/error/dim), monochrome/`NO_COLOR` fallback
       to plain glyphs (13.8)
 - [x] Status line + key bar; `ui_flush_status()` for progress during a blocking call (13.6)
-- [x] `p` play hand-off (`suspend_and_run_play`, the `def_prog_mode`/`endwin`/.../`refresh`
-      pattern from 13.7)
+- [x] Play hand-off (`ui_suspend_and_run_play()` in ui.c, the `def_prog_mode`/`endwin`/.../
+      `refresh` pattern from 13.7), exposed via screen.h for Instances' own `p` to call --
+      deliberately screen-specific, not a global key like `?`/`q` (see F2 Instances below)
 - [x] `text_input_active` flag so a screen's own text box (search, prompts) owns every key
-      instead of global `?`/`p`/Tab/`q` stealing them
+      instead of global `?`/Tab/`q` stealing them
 - [x] `q` quits immediately from any screen, including sidebar focus and mid-build on the
       Build screen
 - [x] No function keys anywhere: F1-F7/F9/F10 are gone (not reliably delivered by every
       terminal/multiplexer/SSH path). Plain-letter bindings instead: `?` help, `q` quit,
-      `p` play, Tab/Left then a screen's own `nav_letter` to switch screens
+      Tab/Left then a screen's own `nav_letter` to switch screens
 - [x] `ui_confirm()` -- blocking y/N confirmation in the status line
-- [x] Reusable scrolling text-view widget (`ui_text_view_*`), used by Build's streamed output
-      and by `ui_show_text_dialog()` (a blocking modal for an arbitrary block of text, used by
-      the Changes dialog's full diff). Help isn't on either yet (still clipped on short
-      terminals)
+- [x] Reusable scrolling list widget (`ui_list_*`): Up/Down/k/j/PgUp/PgDn/Home/End, shared by
+      Database, Library, Patches and Sources -- a long or narrow list scrolls the same way on
+      all four, not just Database
+- [x] Reusable scrolling text-view widget (`ui_text_view_*`), used by Build's streamed output,
+      Help's static text (previously just clipped on short terminals, now scrollable), and by
+      `ui_show_text_dialog()` (a blocking modal for an arbitrary block of text, used by the
+      Changes dialog's full diff)
+- [x] Mouse wheel scrolls the active screen (`mousemask(BUTTON4_PRESSED | BUTTON5_PRESSED)`,
+      decoded in the main loop and reused as if Up/Down had been pressed, so every screen's
+      existing scroll handling applies with no screen-specific code). Clicking a row or the
+      key bar is still not handled (13.5/13.2), so `BUTTON1_CLICKED` is deliberately not
+      requested. A plain drag still goes to nhpm instead of the terminal while wheel reporting
+      is on; Shift+drag bypasses that and selects/copies text normally -- confirmed working,
+      documented in the in-app Help screen and docs/features.md 13.2
 - [x] `ui_show_popup_menu()`: a small bordered popup over the current screen (Up/Down/k/j,
       Enter selects, Esc cancels), for picking one of a short list without replacing the whole
       screen the way Snapshots/Changes do. First real use of the ncurses panel library
@@ -60,20 +71,31 @@ planned to working, move it here instead of leaving the gap implicit.
 
 ## Screens
 
-**F1 Help** -- done (static text, kept in sync with what's actually wired up per screen below).
+**F1 Help** -- done (static text, scrollable, kept in sync with what's actually wired up per
+screen below).
 
 **F2 Instances** -- done
 - [x] List (name/version/patches/built/last played), Enter activates. Built status is
       colored (13.8): red "NOT BUILT", yellow "out of date" (`build_is_stale()`), green
       "built". New instances show up before their first build, clearly marked rather than
       hidden
+- [x] `p` Play (`ui_suspend_and_run_play()`, ui.c/screen.h): runs the active instance's
+      installed game and returns to nhpm when it exits; `last_played` is updated. Instances-
+      only, not a global key like `?`/`q` -- it was global at first, moved here on request
 - [x] `n` New: popups for name, Managed/Linked kind, then (Managed) base source version or
-      (Linked) folder, then build recipe (Esc there defaults to "custom")
+      (Linked) folder, then build recipe (Esc there defaults to "custom"); the new instance
+      becomes active immediately (same as pressing Enter on it), so the next patch/build/play
+      action applies to it. Was a separate manual step at first -- easy to silently apply a
+      patch to whatever instance was already active instead of the one just created, so it
+      moved here on request. Same change in the CLI's `inst new`/`inst link`
 - [x] `c` Clone (prompts new name, y/N copy-saves)
 - [x] `r` Rename (keeps the active-instance pointer following a renamed active instance)
 - [x] `x` Delete (confirms, then y/N keep-saves)
 - [x] `t` Snapshots dialog (blocking, modeled on `ui_confirm()`/`ui_show_popup_input()`): Enter
-      restores, `x` deletes, `a` adds one with an optional label, Esc closes
+      restores, `x` deletes, `a` adds one with an optional label, Esc closes. Restore goes
+      through `stack_restore_snapshot()` (stack.c) -- it used to only swap `instance.conf`
+      and leave the Quilt folder stale (same bug the CLI's `inst restore` had); both now also
+      call `stack_restore()` to actually re-sync the folder, same as `u` Undo already did
 - [x] `e` Export / `i` Import (`.nhinst`): prompts path (export defaults to `<name>.nhinst`;
       import also prompts the new name and an optional base-source version override)
 - [x] Linked instances: `n`'s popup now asks Managed/Linked before the recipe; Linked
@@ -123,7 +145,11 @@ planned to working, move it here instead of leaving the gap implicit.
 - [x] `Enter` view (shows the selected version's touched files and download URL in the status
       line -- no scrolling text-view widget yet to show more)
 - [x] `a` add the selected version straight to the active instance's patch stack
-      (`stack_add()`, same as Database's `D`, but from an already-downloaded version)
+      (`stack_add()`, same as Database's `D`, but from an already-downloaded version).
+      Adding an id already in the stack is rejected (`NHP_EEXIST`, status message naming
+      which slot has it) instead of silently appending a second, conflicting slot -- pressing
+      `a`/`D` twice on the same patch (e.g. because the first press gave no obvious feedback)
+      used to do exactly that
 - [x] `x` delete version / `X` delete patch, confirmed; names any instance still using that
       version (features.md section 8 -- they keep their own copy regardless)
 - [x] `u` checks the site for a newer version (re-reads the cached detail page and compares
@@ -189,8 +215,8 @@ planned to working, move it here instead of leaving the gap implicit.
 - [x] A failed build's status message ("build failed: ...") survives the next redraw instead
       of being overwritten by the generic stale/line-count message (same sticky-status fix as
       Foundation above)
-- [x] `p` play already works globally once a build has succeeded (no Build-specific wiring
-      needed -- `suspend_and_run_play()` in ui.c is screen-independent)
+- [x] A succeeded build points at Instances for Play (`p` isn't a Build-screen key -- see
+      Foundation and F2 Instances above)
 - [x] `custom` recipes now run: `instance.conf`'s `custom_commands` (`;`-separated, no
       quoting, `$PREFIX` substituted for the install path, docs/features.md 10.6) is split
       and run through `proc_run_streaming()`, stopping at the first failure; `build_run()`
@@ -200,13 +226,21 @@ planned to working, move it here instead of leaving the gap implicit.
 - [x] `c` edits `custom_commands` from the Build screen itself (a popup text box, saved via
       `inst_save()`); the details pane shows the current value when the recipe is `custom`.
       Hand-editing `instance.conf` is no longer the only way
+- [x] `s` exports `build.log` to a file you name (a popup "Save to:" prompt, same pattern as
+      Instances' combined-patch export); reads the file `build_run()` wrote rather than
+      reserializing the on-screen lines, so a canceled build still exports what it captured
+- [x] `nethack-3.4-unix` and `nethack-3.6-linux` both now pass extra `make` variables
+      (`CC='cc -std=gnu89 ...'`, and for 3.4 also `WINTTYLIB`/`CHOWN`/`CHGRP`) so they actually
+      build against current GCC/glibc, not just the fixture; see docs/features.md 10.6 for why.
+      Both verified end to end against their real sources (character creation through `#quit`)
 
 **F7 Sources** -- done
 - [x] `n` Known versions popup (`ui_show_popup_menu()`): a small, hand-verified catalog
       (`BSRC_KNOWN_VERSIONS` in sources.c/.h) of real NetHack releases; picking one
       downloads/extracts a tarball or clones a git tag and registers it as a base source in
-      one step. Currently just 3.4.3 (tarball) and 3.6.7 (git tag). Every entry has actually
-      been fetched and confirmed to produce a buildable source tree. Not unit tested (no
+      one step. Currently 3.4.3 (tarball), 3.6.7 (git tag), and 5.0.0 (git tag,
+      `NetHack-5.0.0_Released`). Every entry has actually been fetched and confirmed to
+      produce a buildable source tree, with the matching recipe (10.6). Not unit tested (no
       network in CI, docs/testing.md 17.1); exercised manually instead
 - [x] `a`/`t`/`g` (add from folder/tarball/git, a path or tag you already have) remain the
       manual fallback for anything not in the known-versions catalog. Their path/tag/
@@ -272,9 +306,4 @@ or `m` on Library
 - search for Sources
 - how to create an instance, select patches from the library, and then building
 - add search to Instances page
-- in the build page will I be able to scroll up and down? and add a button to export build log
-- let me scroll the Help page stuff, like Database has
-- make sure that library, patches, and sources all become scrollable with enough content or if the window is small enough, whatever like database has
-
-- next message
-- look at docs/features.md and docs/ui-progress.md, add the ability to export build log file, building isn't working for 3.4.3 and 3.6.7, I choose base source of 3.4.3, but i need a nethack build recipe that works, here are the options nethack-3.4-unix, nethack-3.6-linux, nethack-3.7-linux, i choose nethack-3.4-unix, and i got an error 
+- sort Database, library id number, name, and filter for Mk

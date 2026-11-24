@@ -297,7 +297,7 @@ static void do_build(ui_app *app)
     if (ctx.canceled) {
         g_canceled = true;
     } else if (err == NHP_OK) {
-        ui_set_status(app, "build succeeded -- p to play");
+        ui_set_status(app, "build succeeded -- p on Instances to play");
     } else {
         g_build_failed = true;
         (void)snprintf(g_build_error, sizeof(g_build_error), "%s", err_get());
@@ -340,6 +340,54 @@ static void do_edit_commands(ui_app *app)
     } else {
         ui_set_status(app, "could not save custom_commands: %s", err_get());
     }
+}
+
+/* "s" copies the instance's build.log elsewhere, mirroring scr_instances.c's
+ * "Save to:" pattern for the combined patch (12.2); reads the file build_run()
+ * wrote rather than reserializing g_lines, so a canceled build still exports. */
+static void do_export_log(ui_app *app)
+{
+    if (!app->active_loaded) {
+        ui_set_status(app, "no active instance");
+        return;
+    }
+    if (g_line_count == 0) {
+        ui_set_status(app, "no build output yet -- press b to build first");
+        return;
+    }
+
+    char *dir = inst_dir(app->active_inst.name);
+    char *log_path = (dir != NULL) ? path_join(dir, "build.log") : NULL;
+    free(dir);
+    if (log_path == NULL) {
+        ui_set_status(app, "out of memory");
+        return;
+    }
+    char *data = NULL;
+    size_t len = 0;
+    nhp_err err = fs_read_file(log_path, &data, &len);
+    free(log_path);
+    if (err != NHP_OK) {
+        ui_set_status(app, "could not read build.log: %s", err_get());
+        return;
+    }
+
+    char path[512];
+    (void)snprintf(path, sizeof(path), "%s-build.log", app->active_inst.name);
+    if (!ui_show_popup_input(app, "Export build log to: ", path, sizeof(path), draw) ||
+        path[0] == '\0') {
+        ui_set_status(app, "cancelled");
+        free(data);
+        return;
+    }
+
+    err = fs_write_atomic(path, data, len);
+    free(data);
+    if (err != NHP_OK) {
+        ui_set_status(app, "could not write %s: %s", path, err_get());
+        return;
+    }
+    ui_set_status(app, "exported build log to %s", path);
 }
 
 /* "e" jumps to the next error line after the last one jumped to,
@@ -410,13 +458,18 @@ static bool handle_key(ui_app *app, wint_t ch)
         do_edit_commands(app);
         return true;
     }
+    if (ch == L's') {
+        do_export_log(app);
+        return true;
+    }
     return false;
 }
 
 const ui_screen scr_build = {
     .name = "Build",
     .nav_letter = 'b',
-    .key_bar = "Tab/Left menu  b Build/rebuild  e Next error  c Edit commands  Esc cancel  p Play",
+    .key_bar = "Tab/Left menu  b Build/rebuild  e Next error  c Edit commands  s Export log  "
+               "Esc cancel",
     .enter = enter,
     .leave = leave,
     .draw = draw,

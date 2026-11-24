@@ -63,7 +63,7 @@ static nhp_err run_build_step(const char *src_dir, const char *const *argv, cons
 
 /* "make <verb> PREFIX=<install_dir> <extra_tokens...>". */
 static nhp_err run_make_step(const char *src_dir, const char *verb, const char *prefix_arg,
-                             char *const *extra_tokens, size_t extra_count, const char *label,
+                             const char *const *extra_tokens, size_t extra_count, const char *label,
                              proc_line_fn on_line, void *user_data, buf *log)
 {
     size_t n = 3 + extra_count;
@@ -86,10 +86,10 @@ static nhp_err run_make_step(const char *src_dir, const char *verb, const char *
 
 /* docs/features.md 10.6's unix-family recipe: setup.sh [hint_path], optional
  * "make fetch-lua" (3.7 only), then "make all"/"make install", both with
- * PREFIX=install_dir (HACKDIR is derived from it at build time) plus `make_vars`. */
+ * PREFIX=install_dir, `extra_vars` (recipe-specific, below) and `make_vars`. */
 static nhp_err run_unix_recipe(const char *src_dir, const char *install_dir, const char *hint_path,
-                               bool fetch_lua, const char *make_vars, proc_line_fn on_line,
-                               void *user_data, buf *log)
+                               bool fetch_lua, const char *const *extra_vars, const char *make_vars,
+                               proc_line_fn on_line, void *user_data, buf *log)
 {
     const char *setup_argv[4];
     size_t n = 0;
@@ -119,19 +119,41 @@ static nhp_err run_unix_recipe(const char *src_dir, const char *install_dir, con
         return err;
     }
 
+    size_t extra_vars_count = 0;
+    while (extra_vars != NULL && extra_vars[extra_vars_count] != NULL) {
+        extra_vars_count++;
+    }
+    size_t all_count = extra_vars_count + extra_count;
+    const char **all_tokens = NULL;
+    if (all_count > 0) {
+        all_tokens = malloc(all_count * sizeof(*all_tokens));
+        if (all_tokens == NULL) {
+            str_tokens_free(extra_tokens, extra_count);
+            return NHP_ENOMEM;
+        }
+        size_t k = 0;
+        for (size_t i = 0; i < extra_vars_count; i++) {
+            all_tokens[k++] = extra_vars[i];
+        }
+        for (size_t i = 0; i < extra_count; i++) {
+            all_tokens[k++] = extra_tokens[i];
+        }
+    }
+
     buf prefix_buf;
     buf_init(&prefix_buf);
     buf_append_fmt(&prefix_buf, "PREFIX=%s", install_dir);
     char *prefix_arg = buf_take(&prefix_buf);
 
-    err = run_make_step(src_dir, "all", prefix_arg, extra_tokens, extra_count, "build", on_line,
+    err = run_make_step(src_dir, "all", prefix_arg, all_tokens, all_count, "build", on_line,
                         user_data, log);
     if (err == NHP_OK) {
-        err = run_make_step(src_dir, "install", prefix_arg, extra_tokens, extra_count, "install",
+        err = run_make_step(src_dir, "install", prefix_arg, all_tokens, all_count, "install",
                             on_line, user_data, log);
     }
 
     free(prefix_arg);
+    free(all_tokens);
     str_tokens_free(extra_tokens, extra_count);
     return err;
 }
@@ -184,21 +206,39 @@ static nhp_err run_custom_recipe(const char *src_dir, const char *install_dir,
     return err;
 }
 
+/* Lets these old sources build on modern GCC/glibc (docs/features.md 10.6
+ * for why); via CC, not CFLAGS, so it layers on top of a hints file's own
+ * CFLAGS instead of replacing it. */
+static const char *const GNU89_VARS[] = {"CC=cc -std=gnu89", NULL};
+
+/* 3.4.3 predates the per-OS hints file 3.6+ uses; these replace what a Linux
+ * one would set (docs/features.md 10.6 has the reasoning for each). */
+static const char *const NETHACK_343_UNIX_VARS[] = {
+    "CC=cc -std=gnu89 -DLINUX", "WINTTYLIB=-lncurses", "CHOWN=true", "CHGRP=true", NULL,
+};
+
 static nhp_err run_recipe(const char *recipe, const char *src_dir, const char *install_dir,
                           const char *make_vars, const char *custom_commands, proc_line_fn on_line,
                           void *user_data, buf *log)
 {
     if (str_eq(recipe, "nethack-3.4-unix")) {
-        return run_unix_recipe(src_dir, install_dir, NULL, false, make_vars, on_line, user_data,
-                               log);
+        return run_unix_recipe(src_dir, install_dir, NULL, false, NETHACK_343_UNIX_VARS, make_vars,
+                               on_line, user_data, log);
     }
     if (str_eq(recipe, "nethack-3.6-linux")) {
-        return run_unix_recipe(src_dir, install_dir, "sys/unix/hints/linux", false, make_vars,
-                               on_line, user_data, log);
+        return run_unix_recipe(src_dir, install_dir, "sys/unix/hints/linux", false, GNU89_VARS,
+                               make_vars, on_line, user_data, log);
     }
     if (str_eq(recipe, "nethack-3.7-linux")) {
-        return run_unix_recipe(src_dir, install_dir, "sys/unix/hints/linux.370", true, make_vars,
-                               on_line, user_data, log);
+        return run_unix_recipe(src_dir, install_dir, "sys/unix/hints/linux.370", true, GNU89_VARS,
+                               make_vars, on_line, user_data, log);
+    }
+    if (str_eq(recipe, "nethack-5.0-linux")) {
+        /* No GNU89_VARS/WINTTYLIB/etc. fixup needed: unlike 3.4-3.7, this is
+         * an actively maintained codebase that already builds clean against
+         * current GCC/glibc (docs/features.md 10.6). */
+        return run_unix_recipe(src_dir, install_dir, "sys/unix/hints/linux.500", true, NULL,
+                               make_vars, on_line, user_data, log);
     }
     if (str_eq(recipe, "custom")) {
         return run_custom_recipe(src_dir, install_dir, custom_commands, on_line, user_data, log);

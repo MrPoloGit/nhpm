@@ -218,6 +218,89 @@ static void test_add_disabled_then_enable(void)
     });
 }
 
+/* Regression: adding an id already in the stack used to append a second,
+ * conflicting slot instead of being rejected (docs/ui-progress.md). */
+static void test_add_rejects_duplicate_id(void)
+{
+    WITH_TEMP_INSTANCE({
+        char *p01 = abs_patch("01-lamp-radius.diff");
+        size_t idx = SIZE_MAX;
+        stack_conflict conflict;
+        CHECK(stack_add(&inst, "t01", "1.0", "Lamp Radius", p01, "abc", true, &idx, &conflict) ==
+              NHP_OK);
+        CHECK(inst.patch_count == 1);
+
+        /* same id, enabled slot already exists */
+        nhp_err err = stack_add(&inst, "t01", "1.0", "Lamp Radius", p01, "abc", true, &idx,
+                                &conflict);
+        CHECK(err == NHP_EEXIST);
+        CHECK(inst.patch_count == 1); /* nothing appended */
+        free(p01);
+
+        /* same id, disabled slot already exists */
+        char *p02 = abs_patch("02-apply-pickaxe.diff");
+        size_t idx02 = SIZE_MAX;
+        CHECK(stack_add(&inst, "t02", "1.0", "Apply Pickaxe", p02, "abc", false, &idx02,
+                        &conflict) == NHP_OK);
+        CHECK(inst.patch_count == 2);
+        err = stack_add(&inst, "t02", "1.0", "Apply Pickaxe", p02, "abc", true, &idx02, &conflict);
+        CHECK(err == NHP_EEXIST);
+        CHECK(inst.patch_count == 2);
+        free(p02);
+    });
+}
+
+/* Regression: restoring a chosen snapshot used to only swap instance.conf,
+ * leaving the Quilt folder stale -- it would say one patch while the tree
+ * still had two applied. stack_restore_snapshot() re-syncs the folder too. */
+static void test_restore_snapshot_resyncs_tree(void)
+{
+    WITH_TEMP_INSTANCE({
+        char *src_dir = inst_source_full_path(&inst);
+
+        char *p01 = abs_patch("01-lamp-radius.diff");
+        size_t idx01 = SIZE_MAX;
+        stack_conflict conflict;
+        CHECK(stack_add(&inst, "t01", "1.0", "Lamp Radius", p01, "abc", true, &idx01, &conflict) ==
+              NHP_OK);
+        free(p01);
+        unsigned long one_patch = tree_fingerprint(src_dir);
+
+        char *checkpoint = NULL;
+        CHECK(inst_snapshot_create("stacktest", "one patch applied", &checkpoint) == NHP_OK);
+
+        /* 02-apply-pickaxe.diff touches src/apply.c; check its content, not
+         * the whole tree -- a stray copy of this .diff left in patches/
+         * after restore is a separate, harmless cosmetic issue. */
+        char *apply_c = path_join(src_dir, "src/apply.c");
+        char *p02 = abs_patch("02-apply-pickaxe.diff");
+        size_t idx02 = SIZE_MAX;
+        CHECK(stack_add(&inst, "t02", "1.0", "Apply Pickaxe", p02, "abc", true, &idx02,
+                        &conflict) == NHP_OK);
+        free(p02);
+        CHECK(tree_fingerprint(src_dir) != one_patch); /* tree now has both */
+        char *patched_data = NULL;
+        size_t patched_len = 0;
+        CHECK(fs_read_file(apply_c, &patched_data, &patched_len) == NHP_OK);
+        CHECK(strstr(patched_data, "fake amulet") != NULL);
+        free(patched_data);
+
+        CHECK(stack_restore_snapshot(&inst, checkpoint, &conflict) == NHP_OK);
+        free(checkpoint);
+        CHECK(inst.patch_count == 1);
+        /* the actual point of this test: the source file, not just
+         * instance.conf, is actually back to its one-patch content. */
+        char *restored_data = NULL;
+        size_t restored_len = 0;
+        CHECK(fs_read_file(apply_c, &restored_data, &restored_len) == NHP_OK);
+        CHECK(strstr(restored_data, "fake amulet") == NULL);
+        free(restored_data);
+        free(apply_c);
+
+        free(src_dir);
+    });
+}
+
 static void test_undo_none(void)
 {
     WITH_TEMP_INSTANCE({
@@ -1061,6 +1144,8 @@ int main(void)
 {
     test_add_strip_detection();
     test_add_disabled_then_enable();
+    test_add_rejects_duplicate_id();
+    test_restore_snapshot_resyncs_tree();
     test_undo_none();
     test_undo_enable();
     test_undo_move();

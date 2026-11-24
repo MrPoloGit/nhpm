@@ -569,6 +569,7 @@ nhp_err bsrc_remove(const char *version)
 const bsrc_known_version BSRC_KNOWN_VERSIONS[] = {
     {"3.4.3", BSRC_KNOWN_TARBALL, "https://www.nethack.org/download/3.4.3/nethack-343-src.tgz"},
     {"3.6.7", BSRC_KNOWN_GIT, "NetHack-3.6.7_Released"},
+    {"5.0.0", BSRC_KNOWN_GIT, "NetHack-5.0.0_Released"},
 };
 const size_t BSRC_KNOWN_VERSION_COUNT =
     sizeof(BSRC_KNOWN_VERSIONS) / sizeof(BSRC_KNOWN_VERSIONS[0]);

@@ -658,6 +658,9 @@ static void do_download(ui_app *app, bool add_to_instance)
                           version, app->active_inst.name, conflict.patch_id,
                           conflict.patch_version);
         stack_conflict_free(&conflict);
+    } else if (err == NHP_EEXIST) {
+        set_action_status(app, "%s is already in %s's stack -- see Patches (%s)", entry->id,
+                          app->active_inst.name, err_get());
     } else {
         set_action_status(app, "could not add %s %s: %s", entry->id, version, err_get());
     }

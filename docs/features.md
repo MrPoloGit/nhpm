@@ -401,7 +401,7 @@ It never silently changes either side.
 
 | Operation | What happens |
 |---|---|
-| **New** | pick name, base source (= NetHack version), build recipe; copy the base source into `src/`, set up Quilt, write `instance.conf` |
+| **New** | pick name, base source (= NetHack version), build recipe; copy the base source into `src/`, set up Quilt, write `instance.conf`, and switch to it (it becomes active, same as Switch) |
 | **Clone** | copy the whole instance under a new name (source, patches, settings); optionally without save games |
 | **Rename** | renames the folder and updates `instance.conf`; refused while the instance is locked |
 | **Delete** | after confirmation; asks separately whether to keep the save games (moves `install/` to `~/.local/share/nhpm/orphaned-saves/<name>-<date>/`) |
@@ -423,15 +423,46 @@ command lists, chosen per instance and editable.
 
 | Recipe | Commands (run in `src/`) |
 |---|---|
-| `nethack-3.4-unix` | `sh sys/unix/setup.sh`, then `make all PREFIX=<install_dir>`, `make install PREFIX=<install_dir>` |
-| `nethack-3.6-linux` | `sh sys/unix/setup.sh sys/unix/hints/linux`, then `make all PREFIX=<install_dir>`, `make install PREFIX=<install_dir>` |
-| `nethack-3.7-linux` | `sh sys/unix/setup.sh sys/unix/hints/linux.370`, `make fetch-lua`, `make all PREFIX=<install_dir>`, `make install PREFIX=<install_dir>` |
+| `nethack-3.4-unix` | `sh sys/unix/setup.sh`, then `make all`/`make install`, both `PREFIX=<install_dir> CC='cc -std=gnu89 -DLINUX' WINTTYLIB=-lncurses CHOWN=true CHGRP=true` |
+| `nethack-3.6-linux` | `sh sys/unix/setup.sh sys/unix/hints/linux`, then `make all`/`make install`, both `PREFIX=<install_dir> CC='cc -std=gnu89'` |
+| `nethack-3.7-linux` | `sh sys/unix/setup.sh sys/unix/hints/linux.370`, `make fetch-lua`, then `make all`/`make install`, both `PREFIX=<install_dir> CC='cc -std=gnu89'` |
+| `nethack-5.0-linux` | `sh sys/unix/setup.sh sys/unix/hints/linux.500`, `make fetch-lua`, then `make all`/`make install`, both `PREFIX=<install_dir>` -- no `CC` fixup |
 | `custom` | whatever the user types |
 
 `PREFIX` has to be passed to the build step too, not just install: `HACKDIR` (the data
 directory the game looks for at runtime) is derived from `PREFIX` and baked into the compiled
 binary at build time, so a `make install PREFIX=X` after a plain `make all` produces a binary
 that still looks for the old (or default, `~/nh/install`) location.
+
+`nethack-3.6-linux` and `nethack-3.7-linux` differ in exactly two ways: which hints file picks
+the Linux-specific settings (`sys/unix/hints/linux` vs `.../linux.370`), and that 3.7 also
+needs `make fetch-lua` first -- 3.7 is where NetHack grew embedded Lua scripting (for the
+dungeon/level compilers), which 3.6 doesn't have. Otherwise they're the same recipe shape,
+including needing the same `CC` fixup below; 3.7's hints file is still a direct descendant of
+3.6's codebase (pre-the-rewrite-that-became-5.0), not a from-scratch one.
+
+The `CC` fixup works around a toolchain-vs-vintage-source mismatch, not a choice: current
+GCC/glibc reject NetHack's own old K&R-style empty-parameter externs (`srand48()`, `sleep()`,
+...) in `include/system.h` as conflicting redeclarations of the real ones in
+`<stdlib.h>`/`<unistd.h>`. `CC='cc -std=gnu89 ...'` (not `CFLAGS`, so it layers on top of a
+hints file's own `CFLAGS` instead of replacing it) relaxes that back to pre-C99 rules, which is
+all `nethack-3.6-linux`/`nethack-3.7-linux` need -- their hints files already set everything
+else a modern Linux build needs. `nethack-3.4-unix` needs three more, because 3.4.3 predates
+the per-OS hints-file mechanism those recipes use: `-DLINUX` (`win/tty/termcap.c` has its own
+redundant `extern char *tparm()`, guarded by `#ifndef LINUX`, that conflicts with `curses.h`'s
+real variadic one -- unlike the empty-parameter externs, gnu89 doesn't relax this one), both of
+which `sys/unix/hints/linux` sets for 3.6+, as does `WINTTYLIB` (the default `-ltermlib`
+doesn't exist on modern systems; `Makefile.src`'s own comments name `-lncurses` as the Linux
+choice), and `CHOWN`/`CHGRP` (both default to setting up a shared, multi-user `games`-group
+install that `Makefile.top` documents overriding to `true`; nhpm always installs into one
+instance's own private folder, so that setup is never wanted).
+
+`nethack-5.0-linux` needs none of this: NetHack 5.0 (the rewrite the 3.7 line actually shipped
+as, below) is actively maintained and its `linux.500` hints file already targets current
+glibc directly -- `include/integer.h`'s own C99 detection (`__STDC_VERSION__ >= 199901L`) is
+why forcing `-std=gnu89` here would actually break the build instead of fixing it: it would
+hide that macro and send NetHack down its own pre-C99 `int64_t` fallback, which then conflicts
+with glibc's real one the same way the vintage recipes conflict without the fixup.
 
 For `custom`, the commands actually run come from a separate `custom_commands` key in
 `instance.conf` (`;`-separated, run in `src/` in order), not from the recipe name. Each is
@@ -446,21 +477,23 @@ command needing it doesn't have to spell out an absolute path by hand:
 hand-editing `instance.conf`; editing this list from the Build screen is still open
 (ui-progress.md).
 
-`nethack-3.6-linux` is verified end to end against the real NetHack-3.6.7_Released source
-(milestone M5): the built `nethack` binary installs to `<install_dir>/games/nethack` (a
-wrapper script that `cd`s into `<install_dir>/games/lib/nethackdir` before running the real
-binary; Play runs this wrapper, not the binary directly), and a captured run through
-character creation and `#quit` completes cleanly. `nethack-3.4-unix` and `nethack-3.7-linux`
-follow the same pattern (`PREFIX` is confirmed as the right variable in 3.4.3's Makefile.top
-too) but aren't yet verified end to end; `nethack-3.7-linux` is speculative, since NetHack's
-3.7 line never had its own release, shipping directly as 5.0.0 instead, which no patch in the
-database targets yet.
+`nethack-3.6-linux`, `nethack-3.4-unix` and `nethack-5.0-linux` are all verified end to end
+against their real sources (NetHack-3.6.7_Released, the official 3.4.3 tarball, and
+NetHack-5.0.0_Released): the built `nethack` binary installs to `<install_dir>/games/nethack`
+(a wrapper script that `cd`s into `<install_dir>/games/lib/nethackdir` before running the real
+binary; Play runs this wrapper, not the binary directly), and a captured run through character
+creation completes cleanly on all three. `nethack-3.7-linux` follows the same pattern as
+3.6/3.4 and the gnu89 fix above almost certainly still applies, but it remains unverified and
+speculative, since NetHack's 3.7 line never had its own release under that name -- it shipped
+as 5.0.0 instead, which `nethack-5.0-linux` targets and no patch in the database does yet.
 
-- Build output streams into the Build screen and is saved to `build.log`.
+- Build output streams into the Build screen and is saved to `build.log`; `s` there exports a
+  copy to a file you name, for sharing a failure without digging through the instance's folder.
 - The install goes into the instance's own `install/` folder, so save games, bones and
   scores stay with the instance.
-- **Play** (`p`) suspends the interface (13.7), runs the installed game, and returns to
-  nhpm when the game exits. `last_played` is updated.
+- **Play** (`p` on the Instances screen -- not global, and not on Build even right after a
+  build succeeds there) suspends the interface (13.7), runs the installed game, and returns
+  to nhpm when the game exits. `last_played` is updated.
 - The instance list shows whether the last build is out of date (`stack_modified` newer than
   `last_built` -- deliberately not the instance's general `modified` timestamp, which is
   bumped on every save for any reason, including just playing the game).
@@ -559,8 +592,9 @@ patch depended on it.
 
 **Move:** pop below both positions, swap lines, push; undo on failure.
 
-**Add from library:** copy `patch.diff` to `patches/<id>-<slug>.diff`, add a disabled entry,
-then Enable.
+**Add from library:** rejected (`NHP_EEXIST`, nothing touched) if the id is already in the
+stack, enabled or not -- otherwise copy `patch.diff` to `patches/<id>-<slug>.diff`, add a
+disabled entry, then Enable.
 
 **Remove:** disable if needed, then delete the line, the file and the entry.
 
@@ -839,16 +873,19 @@ noecho();
 keypad(stdscr, TRUE);             /* arrow keys, F-keys, KEY_RESIZE */
 curs_set(0);                      /* hide cursor except in input fields */
 set_escdelay(25);                 /* Esc responds quickly */
-mousemask(BUTTON1_CLICKED | BUTTON4_PRESSED | BUTTON5_PRESSED, NULL);
+mousemask(BUTTON4_PRESSED | BUTTON5_PRESSED, NULL);
 if (has_colors()) { start_color(); use_default_colors(); init_theme(); }
 ```
 
 - `atexit()` and handlers for SIGINT/SIGTERM call `endwin()`, so the terminal is never left
   broken; SIGINT during an operation is turned into "cancel" first.
 - Fatal errors call `endwin()` before printing the message.
-- The `mousemask()` call is not wired up yet: nothing reads `KEY_MOUSE` for anything, so it
-  stays off for now rather than taking click-drag away from the terminal's own text selection
-  for no benefit (docs/ui-progress.md, Foundation section).
+- Only the wheel is requested, not `BUTTON1_CLICKED`: nothing reads a click yet (clicking a
+  row or the key bar is still open, ui-progress.md), and requesting every button would take
+  click-drag away from the terminal's own text selection for no benefit until that's built.
+  A plain drag still goes to nhpm instead of the terminal once wheel reporting is on (that's
+  inherent to the terminal mouse-tracking protocol, not something nhpm can carve exceptions
+  into); Shift+drag bypasses it and selects/copies normally, confirmed working in practice.
 
 ### 13.3 Screen structure
 
@@ -880,7 +917,12 @@ for (;;) {
     wint_t ch;
     int r = wget_wch(stdscr, &ch);       /* blocks; timeout() set while busy */
     if (r == KEY_CODE_YES && ch == KEY_RESIZE) { relayout(); continue; }
-    if (r == KEY_CODE_YES && ch == KEY_MOUSE)  { handle_mouse(); continue; }
+    if (r == KEY_CODE_YES && ch == KEY_MOUSE) {
+        getmouse(&event);                /* wheel only -- a click is still ignored */
+        if (event.bstate & BUTTON4_PRESSED) ch = KEY_UP;
+        else if (event.bstate & BUTTON5_PRESSED) ch = KEY_DOWN;
+        else continue;
+    }
     if (global_key(ch)) continue;        /* ?, q, p, Tab/Left, a nav letter */
     screen->handle_key(screen, ch);
 }
@@ -955,13 +997,12 @@ Color pairs are defined once in `ui.c` by role, not by color:
 
 | Key | Action |
 |---|---|
-| ↑ ↓ / k j, PgUp PgDn, Home End | move |
+| ↑ ↓ / k j, PgUp PgDn, Home End, mouse wheel | move |
 | Enter | open / details |
 | / | incremental search (Esc clears), n / N next/previous |
 | s / S | next sort column / reverse |
 | ? | help |
 | Tab / Left, then a letter | focus the sidebar, then jump to a screen |
-| p | play active instance |
 | q | quit (asks if something is running) |
 
 **F2: Instances**
@@ -975,7 +1016,8 @@ Color pairs are defined once in `ui.c` by role, not by color:
  ───────────────────────────────────────────────────────────────────────────
   Vanilla plus colors. Good for streaming.
   Source: 3.6.7 (managed)  Recipe: nethack-3.6-linux  Saves: 4 games
- Enter activate  n New  c Clone  r Rename  x Delete  t Snapshots  e Export  C Combined  i Import
+ Enter activate  p Play  n New  c Clone  r Rename  x Delete  t Snapshots  e Export  i Import
+ C Combined
 ```
 
 The Snapshots dialog lists snapshots with date and label; **Enter** restores, **x** deletes,
@@ -1038,7 +1080,8 @@ The Snapshots dialog lists snapshots with date and label; **Enter** restores, **
 **F6: Build**
 
 Streams the recipe's output; `error:` lines red, `warning:` yellow; **e** jumps to the next
-error; Esc stops; **b** rebuilds; **p** plays when the build succeeded.
+error; Esc stops; **b** rebuilds; **s** exports `build.log`. Play (**p**) is on Instances,
+once the build has succeeded.
 
 **Changes** (opened by **w** on the Patches screen or **m** in the Library): see 12.5.
 

@@ -130,6 +130,10 @@ void ui_show_changes_dialog(ui_app *app);
  * via mkp_from_folder(). Opened by 'm' on Library; neither pointer is kept. */
 void ui_show_changes_dialog_for_folder(ui_app *app, const char *folder, const mkp_base_spec *base);
 
+/* Hands the terminal to the active instance's game and back (13.7); Instances'
+ * 'p' Play. Defined in ui.c since it needs def_prog_mode()/endwin()/refresh(). */
+void ui_suspend_and_run_play(ui_app *app);
+
 /* One extern per screen (docs/repo-structure.md: "adding a screen means
  * adding one file"), each a const ui_screen defined in its own
  * scr_*.c. */

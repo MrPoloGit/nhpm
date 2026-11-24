@@ -199,13 +199,14 @@ static void draw(ui_app *app)
     }
 }
 
-/* The four recipes build.c can run (docs/features.md 10.6); "custom"
+/* The recipes build.c can run (docs/features.md 10.6); "custom"
  * reads instance.conf's custom_commands, editable from the Build
  * screen's own "c" (docs/ui-progress.md). */
 static const char *const RECIPE_OPTIONS[] = {
     "nethack-3.4-unix",
     "nethack-3.6-linux",
     "nethack-3.7-linux",
+    "nethack-5.0-linux",
     "custom",
 };
 
@@ -243,9 +244,11 @@ static void do_new_linked(ui_app *app, const char *name)
     inst_instance inst;
     nhp_err err = inst_link(name, folder, recipe, &inst);
     if (err == NHP_OK) {
-        ui_set_status(app, "linked %s -> %s (NetHack %s)", name, folder, inst.source);
         inst_free(&inst);
         reload();
+        (void)cfg_set_active_instance(name); /* a fresh instance becomes the active one */
+        ui_reload_active_instance(app);
+        ui_set_status(app, "linked and switched to %s -> %s", name, folder);
     } else {
         ui_set_status(app, "could not link %s: %s", name, err_get());
     }
@@ -292,8 +295,10 @@ static void do_new_managed(ui_app *app, const char *name)
     nhp_err err = inst_new(name, version, recipe, &inst);
     if (err == NHP_OK) {
         inst_free(&inst);
-        ui_set_status(app, "created %s", name);
         reload();
+        (void)cfg_set_active_instance(name); /* a fresh instance becomes the active one */
+        ui_reload_active_instance(app);
+        ui_set_status(app, "created and switched to %s", name);
     } else {
         ui_set_status(app, "could not create %s: %s", name, err_get());
     }
@@ -577,10 +582,23 @@ static void do_snapshots(ui_app *app)
             bool confirmed = ui_confirm(app, message, draw);
             app->text_input_active = true;
             if (confirmed) {
-                nhp_err err = inst_snapshot_restore(inst_name, snaps[list.selected].filename);
+                inst_instance target;
+                nhp_err err = inst_load(inst_name, &target);
                 if (err == NHP_OK) {
-                    ui_set_status(app, "restored %s", inst_name);
-                    restored_active = restored_active || str_eq(app->active_name, inst_name);
+                    stack_conflict conflict;
+                    err = stack_restore_snapshot(&target, snaps[list.selected].filename, &conflict);
+                    if (err == NHP_OK) {
+                        ui_set_status(app, "restored %s", inst_name);
+                        restored_active = restored_active || str_eq(app->active_name, inst_name);
+                    } else if (err == NHP_ECONFLICT) {
+                        ui_show_conflict(app, &conflict);
+                        ui_set_status(app, "restore failed: %s %s does not apply cleanly",
+                                      conflict.patch_id, conflict.patch_version);
+                        stack_conflict_free(&conflict);
+                    } else {
+                        ui_set_status(app, "could not restore: %s", err_get());
+                    }
+                    inst_free(&target);
                 } else {
                     ui_set_status(app, "could not restore: %s", err_get());
                 }
@@ -869,6 +887,10 @@ static bool handle_key(ui_app *app, wint_t ch)
         do_combined(app);
         return true;
     }
+    if (ch == L'p') {
+        ui_suspend_and_run_play(app);
+        return true;
+    }
     return false;
 }
 
@@ -876,7 +898,7 @@ const ui_screen scr_instances = {
     .name = "Instances",
     .nav_letter = 'i',
     .key_bar = "Tab/Left menu  Enter activate  n New  c Clone  r Rename  x Delete  t Snapshots  "
-               "e Export  i Import  C Combined",
+               "e Export  i Import  C Combined  p Play",
     .enter = enter,
     .leave = leave,
     .draw = draw,

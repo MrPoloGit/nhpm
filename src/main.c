@@ -20,12 +20,13 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-/* Forward declarations: these three (defined further down, alongside
- * resolve_instance()) are used by cmd_inst_clone()/cmd_inst_rm()/
- * cmd_inst_restore(), which appear earlier in the file. */
+/* Forward declarations: these (defined further down) are used by
+ * cmd_inst_clone()/cmd_inst_rm()/cmd_inst_restore(), which appear earlier
+ * in the file. */
 static nhp_err resolve_instance_locked(int argc, char **argv, int from, inst_instance *out,
                                        inst_lock *out_lock);
 static nhp_err lock_instance_by_name(const char *name, inst_lock *out_lock);
+static void print_patch_conflict(const stack_conflict *c);
 
 static void print_usage(FILE *out)
 {
@@ -493,8 +494,9 @@ static int cmd_inst_new(int argc, char **argv)
         (void)fprintf(stderr, "nhpm: could not create %s: %s\n", argv[3], err_get());
         return 1;
     }
-    (void)printf("Created instance %s.\n", argv[3]);
     inst_free(&inst);
+    (void)cfg_set_active_instance(argv[3]); /* a fresh instance becomes the active one */
+    (void)printf("Created and switched to instance %s.\n", argv[3]);
     return 0;
 }
 
@@ -510,8 +512,10 @@ static int cmd_inst_link(int argc, char **argv)
         (void)fprintf(stderr, "nhpm: could not link %s: %s\n", argv[3], err_get());
         return 1;
     }
-    (void)printf("Linked instance %s -> %s (NetHack %s).\n", argv[3], argv[4], inst.source);
+    (void)printf("Linked and switched to instance %s -> %s (NetHack %s).\n", argv[3], argv[4],
+                 inst.source);
     inst_free(&inst);
+    (void)cfg_set_active_instance(argv[3]); /* a fresh instance becomes the active one */
     return 0;
 }
 
@@ -693,10 +697,22 @@ static int cmd_inst_restore(int argc, char **argv)
         (void)fprintf(stderr, "nhpm: %s\n", err_get());
         return (err == NHP_ELOCKED) ? 5 : 1;
     }
-    err = inst_snapshot_restore(argv[3], argv[4]);
+    inst_instance inst;
+    err = inst_load(argv[3], &inst);
+    if (err == NHP_OK) {
+        stack_conflict conflict = {0};
+        err = stack_restore_snapshot(&inst, argv[4], &conflict);
+        if (err == NHP_ECONFLICT) {
+            print_patch_conflict(&conflict);
+            stack_conflict_free(&conflict);
+        }
+        inst_free(&inst);
+    }
     inst_lock_release(&lock);
     if (err != NHP_OK) {
-        (void)fprintf(stderr, "nhpm: could not restore %s: %s\n", argv[4], err_get());
+        if (err != NHP_ECONFLICT) {
+            (void)fprintf(stderr, "nhpm: could not restore %s: %s\n", argv[4], err_get());
+        }
         return 1;
     }
     (void)printf("Restored %s from %s.\n", argv[3], argv[4]);

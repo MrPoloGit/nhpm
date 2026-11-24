@@ -8,19 +8,22 @@
 #include <curses.h>
 
 /* What's actually wired up today, screen by screen -- kept in sync with
- * each scr_*.c's own key_bar so this never describes a dead key. Plain
- * static text for now, clipped to whatever fits (see draw() below). */
+ * each scr_*.c's own key_bar so this never describes a dead key. Scrolls
+ * via ui_text_view, the same widget Build's streamed output uses. */
 static const char *const HELP_LINES[] = {
     "Global keys",
     "  Up/Down, k/j, PgUp/PgDn, Home/End   move the selection",
+    "  Mouse wheel                          scrolls the same way (no clicking yet)",
+    "  Shift+drag (most terminals)          selects/copies text normally -- plain drag goes",
+    "                                       to nhpm instead, since the wheel needs that on",
     "  Tab or Left arrow                   focus the sidebar (Up/Down+Enter, or a",
     "                                       letter, jumps screens; Right/Enter returns)",
     "  ?                                    this help",
-    "  p                                    play the active instance (once it's built)",
     "  q                                    quit immediately, on any screen (even mid-build)",
     "",
-    "F2  Instances -- create, clone, rename, delete, snapshot, export/import",
+    "F2  Instances -- create, clone, rename, delete, snapshot, export/import, play",
     "  Enter                               make the selected instance active",
+    "  p                                   play the active instance (once it's built)",
     "  n                                   new instance: name, Managed (from a base",
     "                                       source) or Linked (an existing folder), recipe",
     "  c                                   clone the selected instance",
@@ -76,8 +79,9 @@ static const char *const HELP_LINES[] = {
     "  b                                   build / rebuild; Esc while it's running cancels it",
     "  e                                   jump to the next error: line (wraps around)",
     "  c                                   edit instance.conf's custom_commands (recipe custom)",
+    "  s                                   export build.log to a file you name",
     "  Up/Down, PgUp/PgDn, Home/End         scroll the output",
-    "  error:/warning: lines colored red/yellow; p plays once a build succeeds",
+    "  error:/warning: lines colored red/yellow; play from Instances once it succeeds",
     "",
     "F7  Sources -- base NetHack sources: folder, tarball, git",
     "  a                                   add from a local folder",
@@ -88,6 +92,28 @@ static const char *const HELP_LINES[] = {
 };
 static const size_t HELP_LINE_COUNT = sizeof(HELP_LINES) / sizeof(HELP_LINES[0]);
 
+static ui_text_view g_view;
+
+static int visible_rows(const ui_app *app)
+{
+    WINDOW *w = app->layout.main_win;
+    return (w != NULL) ? getmaxy(w) - 2 : 1;
+}
+
+// cppcheck-suppress constParameterCallback -- must match ui_text_view_draw_line_fn's signature
+static void draw_line(WINDOW *win, int y, int width, size_t index, void *user_data)
+{
+    (void)user_data;
+    (void)mvwaddnstr(win, y, 1, HELP_LINES[index], width - 1);
+}
+
+// cppcheck-suppress constParameterCallback -- must match ui_screen.enter's signature
+static void enter(ui_app *app)
+{
+    (void)app;
+    ui_text_view_init(&g_view); /* always from the top, same as opening fresh */
+}
+
 static void draw(ui_app *app)
 {
     WINDOW *w = app->layout.main_win;
@@ -96,20 +122,49 @@ static void draw(ui_app *app)
     }
     (void)werase(w);
     ui_draw_panel(w, "Help");
-    int inner_height = getmaxy(w) - 2;
     int inner_width = getmaxx(w) - 2;
-    for (int i = 0; i < inner_height && (size_t)i < HELP_LINE_COUNT; i++) {
-        (void)mvwaddnstr(w, i + 1, 1, HELP_LINES[i], inner_width);
-    }
+    ui_text_view_draw(&g_view, w, 1, visible_rows(app), inner_width, HELP_LINE_COUNT, draw_line,
+                      NULL);
     (void)wnoutrefresh(w);
+}
+
+static bool handle_key(ui_app *app, wint_t ch)
+{
+    int visible = visible_rows(app);
+
+    if (ch == KEY_UP || ch == L'k') {
+        ui_text_view_scroll(&g_view, -1, HELP_LINE_COUNT, visible);
+        return true;
+    }
+    if (ch == KEY_DOWN || ch == L'j') {
+        ui_text_view_scroll(&g_view, 1, HELP_LINE_COUNT, visible);
+        return true;
+    }
+    if (ch == KEY_PPAGE) {
+        ui_text_view_scroll(&g_view, -visible, HELP_LINE_COUNT, visible);
+        return true;
+    }
+    if (ch == KEY_NPAGE) {
+        ui_text_view_scroll(&g_view, visible, HELP_LINE_COUNT, visible);
+        return true;
+    }
+    if (ch == KEY_HOME) {
+        ui_text_view_scroll(&g_view, -(int)HELP_LINE_COUNT, HELP_LINE_COUNT, visible);
+        return true;
+    }
+    if (ch == KEY_END) {
+        ui_text_view_scroll_to_end(&g_view, HELP_LINE_COUNT, visible);
+        return true;
+    }
+    return false;
 }
 
 const ui_screen scr_help = {
     .name = "Help",
     .nav_letter = 'h',
     .key_bar = "Tab/Left menu  q quit",
-    .enter = NULL,
+    .enter = enter,
     .leave = NULL,
     .draw = draw,
-    .handle_key = NULL,
+    .handle_key = handle_key,
 };

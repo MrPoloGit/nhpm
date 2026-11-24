@@ -448,6 +448,8 @@ static bool popup_input_loop(ui_app *app, const char *title, char *out, size_t o
 
     int inner_width = win_width - 2;
     app->text_input_active = true;
+    size_t cursor = strlen(edit); /* starts at the end, same as the old append-only behavior */
+    (void)curs_set(1);            /* a real cursor here, hidden everywhere else (13.2) */
     bool committed = false;
     for (;;) {
         if (redraw != NULL) {
@@ -457,17 +459,16 @@ static bool popup_input_loop(ui_app *app, const char *title, char *out, size_t o
         (void)werase(win);
         ui_draw_panel(win, title);
 
+        /* Keeps the cursor in view, scrolling right as it passes the edge;
+         * recomputed fresh from `cursor` each draw, so it scrolls back left
+         * correctly too, with no extra state to track. */
         size_t edit_len = strlen(edit);
-        const char *visible = edit;
-        if ((int)edit_len > inner_width - 1) {
-            visible = edit + (edit_len - (size_t)(inner_width - 1));
-        }
-        char line[sizeof(edit) + 1];
-        (void)snprintf(line, sizeof(line), "%s_", visible);
-        (void)mvwaddnstr(win, 1, 1, line, inner_width);
+        size_t offset = (cursor >= (size_t)inner_width) ? cursor - (size_t)inner_width + 1 : 0;
+        (void)mvwaddnstr(win, 1, 1, edit + offset, inner_width);
         (void)mvwaddnstr(
             win, 2, 1, (on_change != NULL) ? "Enter apply  Esc clear" : "Enter confirm  Esc cancel",
             inner_width);
+        (void)wmove(win, 1, 1 + (int)(cursor - offset));
 
         (void)update_panels();
         (void)doupdate();
@@ -484,18 +485,43 @@ static bool popup_input_loop(ui_app *app, const char *title, char *out, size_t o
         if (ch == 27) { /* Esc */
             break;
         }
+        if (ch == KEY_LEFT) {
+            if (cursor > 0) {
+                cursor--;
+            }
+            continue;
+        }
+        if (ch == KEY_RIGHT) {
+            if (cursor < edit_len) {
+                cursor++;
+            }
+            continue;
+        }
+        if (ch == KEY_HOME) {
+            cursor = 0;
+            continue;
+        }
+        if (ch == KEY_END) {
+            cursor = edit_len;
+            continue;
+        }
         bool changed = false;
         if (ch == KEY_BACKSPACE || ch == 127 || ch == 8) {
-            size_t len = strlen(edit);
-            if (len > 0) {
-                edit[len - 1] = '\0';
+            if (cursor > 0) {
+                memmove(edit + cursor - 1, edit + cursor, edit_len - cursor + 1);
+                cursor--;
+                changed = true;
+            }
+        } else if (ch == KEY_DC) {
+            if (cursor < edit_len) {
+                memmove(edit + cursor, edit + cursor + 1, edit_len - cursor);
                 changed = true;
             }
         } else if (ch >= 0x20 && ch < 0x7f) {
-            size_t len = strlen(edit);
-            if (len + 1 < sizeof(edit)) {
-                edit[len] = (char)ch;
-                edit[len + 1] = '\0';
+            if (edit_len + 1 < sizeof(edit)) {
+                memmove(edit + cursor + 1, edit + cursor, edit_len - cursor + 1);
+                edit[cursor] = (char)ch;
+                cursor++;
                 changed = true;
             }
         }
@@ -503,6 +529,7 @@ static bool popup_input_loop(ui_app *app, const char *title, char *out, size_t o
             on_change(app, edit);
         }
     }
+    (void)curs_set(0);
     app->text_input_active = false;
 
     (void)del_panel(panel);

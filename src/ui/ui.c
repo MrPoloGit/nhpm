@@ -325,9 +325,10 @@ static nhp_err ui_startup(void)
     (void)keypad(stdscr, TRUE);
     (void)curs_set(0);
     set_escdelay(25);
-    /* No mousemask() call: it would take click-drag away from the terminal's
-     * text selection, and nothing reads KEY_MOUSE yet (docs/ui-progress.md).
-     * Revisit once click handling is built. */
+    /* Wheel events only, not clicks/drags -- most terminals keep Shift+drag
+     * for text selection even with mouse reporting on. Scroll only; click
+     * handling is still open (docs/ui-progress.md). */
+    (void)mousemask(BUTTON4_PRESSED | BUTTON5_PRESSED, NULL);
 
     /* Primes curscr's idea of "what's on screen" right after initscr()
      * -- without this, some terminals don't show anything until the
@@ -528,9 +529,9 @@ static void switch_to(ui_app *app, size_t index)
 }
 
 /* Hands the terminal to another program and takes it back afterward
- * (docs/features.md section 13.7) -- used for Play ('p'); the pager and
- * $EDITOR will reuse this once the screens that need them exist. */
-static void suspend_and_run_play(ui_app *app)
+ * (docs/features.md section 13.7) -- used for Instances' 'p' Play; the
+ * pager and $EDITOR will reuse this once the screens that need them exist. */
+void ui_suspend_and_run_play(ui_app *app)
 {
     if (!app->active_loaded) {
         ui_set_status(app, "no active instance to play");
@@ -632,10 +633,6 @@ static bool handle_global_key(ui_app *app, wint_t ch)
         }
         return true;
     }
-    if (ch == L'p') {
-        suspend_and_run_play(app);
-        return true;
-    }
     return false;
 }
 
@@ -693,8 +690,19 @@ nhp_err ui_run(bool debug)
         }
         if (r == KEY_CODE_YES && ch == KEY_MOUSE) {
             MEVENT event;
-            (void)getmouse(&event);
-            continue;
+            if (getmouse(&event) != OK) {
+                continue;
+            }
+            /* Falls through as if the matching arrow key had been pressed,
+             * so every screen's existing scroll handling (and sidebar
+             * focus) applies with no screen-specific mouse code. */
+            if (event.bstate & BUTTON4_PRESSED) {
+                ch = KEY_UP;
+            } else if (event.bstate & BUTTON5_PRESSED) {
+                ch = KEY_DOWN;
+            } else {
+                continue;
+            }
         }
         if (handle_global_key(&g_app, ch)) {
             continue;

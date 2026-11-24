@@ -605,6 +605,9 @@ static void do_add(ui_app *app)
                           v->version, app->active_inst.name, conflict.patch_id,
                           conflict.patch_version);
         stack_conflict_free(&conflict);
+    } else if (err == NHP_EEXIST) {
+        set_action_status(app, "%s is already in %s's stack -- see Patches (%s)", p->id,
+                          app->active_inst.name, err_get());
     } else {
         set_action_status(app, "could not add %s %s: %s", p->id, v->version, err_get());
     }

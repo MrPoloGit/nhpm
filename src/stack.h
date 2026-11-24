@@ -47,7 +47,7 @@ nhp_err stack_move(inst_instance *inst, size_t from, size_t to, stack_conflict *
 
 /* Copies `library_patch_path` into <src>/patches/, adds a disabled entry to
  * inst->patches, then calls stack_enable() if `enable` (docs 11.5's "Add
- * from library"). A failed enable leaves it added but disabled either way. */
+ * from library"). NHP_EEXIST, nothing touched, if `id` is already there. */
 nhp_err stack_add(inst_instance *inst, const char *id, const char *version, const char *name,
                   const char *library_patch_path, const char *sha256, bool enable,
                   size_t *out_new_index, stack_conflict *out_conflict);
@@ -147,9 +147,14 @@ void stack_shared_files_free(stack_shared_file *files, size_t count);
 nhp_err stack_find_shared_files(const inst_instance *inst, stack_shared_file **out_files,
                                 size_t *out_count);
 
-/* docs 11.8's "u": restores the most recent "auto-"-labeled snapshot and
- * re-syncs the Quilt folder to match. On success *inst is reloaded.
- * NHP_ENOENT if there's no such snapshot. */
+/* docs 10.5's "Restore snapshot": restores `filename`'s instance.conf,
+ * then stack_restore() to re-sync the Quilt folder too. *inst is reloaded
+ * on success, left untouched (including on conflict) otherwise. */
+nhp_err stack_restore_snapshot(inst_instance *inst, const char *filename,
+                               stack_conflict *out_conflict);
+
+/* docs 11.8's "u": stack_restore_snapshot() with the most recent
+ * "auto-"-labeled snapshot. NHP_ENOENT if there's no such snapshot. */
 nhp_err stack_undo(inst_instance *inst, stack_conflict *out_conflict);
 
 #endif /* NHPM_STACK_H */

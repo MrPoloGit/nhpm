@@ -718,6 +718,14 @@ nhp_err stack_add(inst_instance *inst, const char *id, const char *version, cons
                   const char *library_patch_path, const char *sha256, bool enable,
                   size_t *out_new_index, stack_conflict *out_conflict)
 {
+    for (size_t i = 0; i < inst->patch_count; i++) {
+        if (str_eq(inst->patches[i].id, id)) {
+            err_set("%s is already in the stack (slot %zu, %s)", id, i + 1,
+                    inst->patches[i].enabled ? "enabled" : "disabled");
+            return NHP_EEXIST;
+        }
+    }
+
     nhp_err snap_err = take_auto_snapshot(inst, "add", id);
     if (snap_err != NHP_OK) {
         return snap_err;
@@ -1413,6 +1421,31 @@ nhp_err stack_find_shared_files(const inst_instance *inst, stack_shared_file **o
     return NHP_OK;
 }
 
+nhp_err stack_restore_snapshot(inst_instance *inst, const char *filename,
+                               stack_conflict *out_conflict)
+{
+    nhp_err err = inst_snapshot_restore(inst->name, filename);
+    if (err != NHP_OK) {
+        return err;
+    }
+
+    inst_instance reloaded;
+    err = inst_load(inst->name, &reloaded);
+    if (err != NHP_OK) {
+        return err;
+    }
+
+    err = stack_restore(&reloaded, out_conflict);
+    if (err != NHP_OK) {
+        inst_free(&reloaded);
+        return err;
+    }
+
+    inst_free(inst);
+    *inst = reloaded;
+    return NHP_OK;
+}
+
 nhp_err stack_undo(inst_instance *inst, stack_conflict *out_conflict)
 {
     inst_snapshot *snaps = NULL;
@@ -1435,27 +1468,9 @@ nhp_err stack_undo(inst_instance *inst, stack_conflict *out_conflict)
         return NHP_ENOENT;
     }
 
-    err = inst_snapshot_restore(inst->name, target);
+    err = stack_restore_snapshot(inst, target, out_conflict);
     free(target);
-    if (err != NHP_OK) {
-        return err;
-    }
-
-    inst_instance reloaded;
-    err = inst_load(inst->name, &reloaded);
-    if (err != NHP_OK) {
-        return err;
-    }
-
-    err = stack_restore(&reloaded, out_conflict);
-    if (err != NHP_OK) {
-        inst_free(&reloaded);
-        return err;
-    }
-
-    inst_free(inst);
-    *inst = reloaded;
-    return NHP_OK;
+    return err;
 }
 
 nhp_err stack_restore(const inst_instance *inst, stack_conflict *out_conflict)
