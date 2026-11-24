@@ -265,6 +265,30 @@ void str_tokens_free(char **tokens, size_t count)
     free(tokens);
 }
 
+bool str_matches_all_words(const char *filter, const char *const *fields, size_t field_count)
+{
+    if (filter == NULL || filter[0] == '\0') {
+        return true;
+    }
+    char **words = NULL;
+    size_t word_count = 0;
+    if (str_split_whitespace(filter, &words, &word_count) != NHP_OK) {
+        return true; /* out of memory: don't hide everything over it */
+    }
+    bool all_match = true;
+    for (size_t i = 0; all_match && i < word_count; i++) {
+        bool any_field = false;
+        for (size_t j = 0; !any_field && j < field_count; j++) {
+            if (fields[j] != NULL && str_contains_ci(fields[j], words[i])) {
+                any_field = true;
+            }
+        }
+        all_match = any_field;
+    }
+    str_tokens_free(words, word_count);
+    return all_match;
+}
+
 /* ---- growable byte buffer ---- */
 
 void buf_init(buf *b)

@@ -1023,6 +1023,10 @@ Color pairs are defined once in `ui.c` by role, not by color:
 The Snapshots dialog lists snapshots with date and label; **Enter** restores, **x** deletes,
 **a** adds a new one.
 
+**/** searches name/version/recipe/notes (plain words, all must match) and hides everything
+that doesn't -- there's no J/K-style reordering here, so unlike Patches (13.9 below) a true
+filter has no ambiguous "real position" to worry about.
+
 **F3: Database**
 
 ```
@@ -1076,6 +1080,11 @@ The Snapshots dialog lists snapshots with date and label; **Enter** restores, **
 - When the working folder has edits not yet captured, the header shows
   `● uncaptured changes` so they aren't forgotten.
 - Files touched by more than one enabled patch are flagged in the details area.
+- **/** searches id/name/version/target (plain words, all must match) and **highlights**
+  matches rather than hiding the rest, since row position here is the real Quilt stack order
+  J/K's "one slot" move depends on -- hiding rows could make J/K silently skip past several
+  real positions at once. **n** jumps to the next match, wrapping; it's the only way to reach
+  one (not an alias for `j` the way Database's own `n` is), since searching doesn't scroll.
 
 **F6: Build**
 
@@ -1096,7 +1105,16 @@ once the build has succeeded.
  a Add from folder  t Add from tarball  g Add from git tag  x Remove
 ```
 
+**/** searches version/origin (plain words, all must match) and hides everything that
+doesn't, same as Instances above; no `n`/`N` next-match keys, since `n` is already Known
+version here and there's no second free letter to pair with it.
+
 ### 13.10 Search syntax (Database and Library)
+
+Instances, Patches and Sources also have a `/` search (13.9), but a simpler one: plain words
+against their own columns, case-insensitive, all must match -- no tokens, since none of
+`v:`/`a:`/`r:`/`id:`/`lib:`/`in:`/`mk:` below mean anything on those screens. This section's
+syntax is Database/Library-specific:
 
 Plain words match name, author and description (case-insensitive, all must match), plus:
 

@@ -87,6 +87,23 @@ static void test_str_split_whitespace(void)
     CHECK(tokens == NULL && count == 0);
 }
 
+static void test_str_matches_all_words(void)
+{
+    const char *fields[] = {"367-colorful", "nethack-3.6-linux", "streaming setup"};
+
+    CHECK(str_matches_all_words("", fields, 3));    /* empty filter: always matches */
+    CHECK(str_matches_all_words(NULL, fields, 3));  /* NULL filter: same */
+    CHECK(str_matches_all_words("color", fields, 3));
+    CHECK(str_matches_all_words("COLOR", fields, 3)); /* case-insensitive */
+    CHECK(str_matches_all_words("linux stream", fields, 3)); /* each word, any field */
+    CHECK(!str_matches_all_words("linux nonexistentword", fields, 3)); /* one word fails */
+    CHECK(!str_matches_all_words("zzz", fields, 3));
+
+    const char *with_null[] = {NULL, "second"};
+    CHECK(str_matches_all_words("second", with_null, 2)); /* a NULL field is skipped, not a crash */
+    CHECK(!str_matches_all_words("first", with_null, 2));
+}
+
 static void test_buf(void)
 {
     buf b;
@@ -228,6 +245,7 @@ int main(void)
     test_str_helpers();
     test_str_replace_all();
     test_str_split_whitespace();
+    test_str_matches_all_words();
     test_buf();
     test_path_join();
     test_path_is_safe();

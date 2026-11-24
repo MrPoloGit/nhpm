@@ -48,6 +48,11 @@ static size_t g_shared_count = 0;
  * comparison (12.3 steps 1-2), not a cheap flag. */
 static bool g_has_uncaptured = false;
 
+/* "/" search (13.9), highlight-and-jump, not hide-non-matches like
+ * scr_db.c/scr_library.c: row position is the real Quilt stack order
+ * J/K depends on, so hiding rows would make it skip some silently. */
+static char g_filter[256] = "";
+
 static void free_check_results(void)
 {
     stack_check_result_free(g_check_results);
@@ -162,6 +167,15 @@ static void lookup_name_and_target(const char *id, char **out_name, char **out_t
     lib_patch_free(&lp);
 }
 
+/* Against id/name/version/target. `name`/`target` may be NULL (lib entry
+ * gone, see lookup_name_and_target() above); str_matches_all_words() skips
+ * a NULL field rather than treating it as a match. */
+static bool patch_matches_filter(const inst_patch *patch, const char *name, const char *target)
+{
+    const char *fields[] = {patch->id, name, target, patch->version};
+    return str_matches_all_words(g_filter, fields, 4);
+}
+
 /* docs/features.md 11.7's "c" dry-run results, as a Status-column word:
  * "applied"/"disabled" from inst_patch itself, plus the dry-run outcome
  * for a disabled patch once g_checked (NULL before "c" has run). */
@@ -213,11 +227,15 @@ static void draw_row(WINDOW *win, int y, int width, size_t index, bool selected,
                    patch->enabled ? "on" : "off", patch->id, name != NULL ? name : "(unknown)",
                    patch->version, target != NULL ? target : "", status_text);
     char *text = buf_take(&line);
+    bool matches_filter = g_filter[0] != '\0' && patch_matches_filter(patch, name, target);
 
     bool colorize = !app->monochrome && !selected;
 
     if (selected) {
         (void)wattron(win, A_REVERSE);
+    }
+    if (matches_filter) {
+        (void)wattron(win, A_BOLD);
     }
     if (colorize) {
         (void)wattron(win, COLOR_PAIR(mark_color(mark)));
@@ -227,6 +245,9 @@ static void draw_row(WINDOW *win, int y, int width, size_t index, bool selected,
         (void)wattroff(win, COLOR_PAIR(mark_color(mark)));
     }
     (void)mvwaddnstr(win, y, 2, text, width - 1);
+    if (matches_filter) {
+        (void)wattroff(win, A_BOLD);
+    }
     if (selected) {
         (void)wattroff(win, A_REVERSE);
     }
@@ -312,7 +333,7 @@ static void draw(ui_app *app)
         return;
     }
     (void)werase(w);
-    ui_draw_panel(w, "Patches");
+    ui_draw_panel(w, g_filter[0] != '\0' ? "Patches (search on)" : "Patches");
     int inner_width = getmaxx(w) - 2;
 
     if (!app->active_loaded) {
@@ -722,6 +743,56 @@ static void do_undo(ui_app *app)
     }
 }
 
+static void on_search_change(ui_app *app, const char *text)
+{
+    (void)app;
+    (void)snprintf(g_filter, sizeof(g_filter), "%s", text);
+}
+
+/* "/": highlights matches live as you type (on_search_change() above), same
+ * widget Database/Library use, but doesn't hide anything -- see g_filter's
+ * own comment for why. Esc clears the filter entirely, same convention. */
+static void do_search(ui_app *app)
+{
+    char search_text[256];
+    (void)snprintf(search_text, sizeof(search_text), "%s", g_filter);
+    bool committed = ui_show_popup_input_live(app, "Search (highlights matches; n jumps)",
+                                              search_text, sizeof(search_text), draw,
+                                              on_search_change);
+    (void)snprintf(g_filter, sizeof(g_filter), "%s", committed ? search_text : "");
+}
+
+/* "n": jumps the selection to the next match, wrapping around. Unlike
+ * Database/Library's own "n" (just an alias for "down" on an already-
+ * filtered list), this is the only way to reach a match here. */
+static void do_jump_to_match(ui_app *app, size_t count, int visible)
+{
+    if (g_filter[0] == '\0') {
+        ui_set_status(app, "no active filter -- / to search");
+        return;
+    }
+    if (count == 0) {
+        return;
+    }
+    for (size_t step = 1; step <= count; step++) {
+        size_t idx = (g_list.selected + step) % count;
+        const inst_patch *patch = &app->active_inst.patches[idx];
+        char *name = NULL;
+        char *target = NULL;
+        lookup_name_and_target(patch->id, &name, &target);
+        bool matches = patch_matches_filter(patch, name, target);
+        free(name);
+        free(target);
+        if (matches) {
+            g_list.selected = idx;
+            ui_list_move(&g_list, 0, count, visible); /* just fixes scroll */
+            ui_set_status(app, "match: %s", patch->id);
+            return;
+        }
+    }
+    ui_set_status(app, "no match for \"%s\"", g_filter);
+}
+
 static bool handle_key(ui_app *app, wint_t ch)
 {
     if (!app->active_loaded) {
@@ -731,6 +802,14 @@ static bool handle_key(ui_app *app, wint_t ch)
     int visible = (w != NULL) ? getmaxy(w) - 3 : 1;
     size_t count = app->active_inst.patch_count;
 
+    if (ch == L'/') {
+        do_search(app);
+        return true;
+    }
+    if (ch == L'n') {
+        do_jump_to_match(app, count, visible);
+        return true;
+    }
     if (ch == KEY_UP || ch == L'k') {
         ui_list_move(&g_list, -1, count, visible);
         return true;
@@ -903,7 +982,8 @@ const ui_screen scr_patches = {
     .name = "Patches",
     .nav_letter = 'p',
     .key_bar = "Tab/Left menu  Space toggle  J/K move  d Diff  w Capture changes  x remove  N new "
-               "patch  E edit  o open file  R refresh  c Check  t Snapshot  u Undo",
+               "patch  E edit  o open file  R refresh  c Check  t Snapshot  u Undo  / Search  "
+               "n Next match",
     .enter = enter,
     .leave = leave,
     .draw = draw,

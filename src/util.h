@@ -99,6 +99,11 @@ char *str_replace_all(const char *s, const char *needle, const char *replacement
 nhp_err str_split_whitespace(const char *s, char ***out_tokens, size_t *out_count);
 void str_tokens_free(char **tokens, size_t count);
 
+/* True if every word in `filter` is a substring of some `fields` entry --
+ * scr_db.c/scr_library.c's "plain words match N columns" rule, generalized.
+ * An empty/unparseable filter always matches, same as str_contains_ci(). */
+bool str_matches_all_words(const char *filter, const char *const *fields, size_t field_count);
+
 /* ---- growable byte buffer ---- */
 
 typedef struct buf {

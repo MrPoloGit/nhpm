@@ -21,6 +21,13 @@ static bsrc_source *g_sources = NULL;
 static size_t g_count = 0;
 static ui_list g_list;
 
+/* "/" search (13.9): a true filter, unlike Patches' highlight-and-jump --
+ * no J/K-style reordering here, so hiding rows has no ambiguous "real
+ * position" to worry about. Pointers into g_sources, rebuilt on change. */
+static char g_filter[256] = "";
+static const bsrc_source **g_visible = NULL;
+static size_t g_visible_count = 0;
+
 /* Last add/remove result, kept so it survives the redraw right after --
  * draw() used to overwrite it with the generic source-count line,
  * making a failed clone look like it had silently finished. */
@@ -28,6 +35,37 @@ static char g_action_status[256] = "";
 
 static inst_instance *g_instances = NULL;
 static size_t g_inst_count = 0;
+
+/* Rebuilds g_visible from g_sources against g_filter (version + origin,
+ * plain-words-all-must-match). Keeps the same entry selected if it's
+ * still visible, instead of snapping to the top on every keystroke. */
+static void recompute_visible(void)
+{
+    const bsrc_source *kept = (g_visible_count > 0 && g_list.selected < g_visible_count)
+                                  ? g_visible[g_list.selected]
+                                  : NULL;
+    free(g_visible);
+    g_visible = malloc((g_count > 0 ? g_count : 1) * sizeof(*g_visible));
+    g_visible_count = 0;
+    if (g_visible == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < g_count; i++) {
+        const char *fields[] = {g_sources[i].version, g_sources[i].origin};
+        if (str_matches_all_words(g_filter, fields, 2)) {
+            g_visible[g_visible_count++] = &g_sources[i];
+        }
+    }
+    ui_list_init(&g_list);
+    if (kept != NULL) {
+        for (size_t i = 0; i < g_visible_count; i++) {
+            if (g_visible[i] == kept) {
+                g_list.selected = i;
+                break;
+            }
+        }
+    }
+}
 
 static void reload(void)
 {
@@ -43,7 +81,7 @@ static void reload(void)
     }
     (void)bsrc_list(&g_sources, &g_count);
     (void)inst_list(&g_instances, &g_inst_count);
-    ui_list_init(&g_list);
+    recompute_visible();
 }
 
 static void enter(ui_app *app)
@@ -65,6 +103,9 @@ static void leave(ui_app *app)
         g_instances = NULL;
         g_inst_count = 0;
     }
+    free(g_visible);
+    g_visible = NULL;
+    g_visible_count = 0;
 }
 
 static size_t usage_count(const char *version)
@@ -140,7 +181,7 @@ static bool looks_downloaded(const char *version)
 static void draw_row(WINDOW *win, int y, int width, size_t index, bool selected, void *user_data)
 {
     const ui_app *app = user_data;
-    const bsrc_source *src = &g_sources[index];
+    const bsrc_source *src = g_visible[index];
     bool downloaded = looks_downloaded(src->version);
 
     buf origin_buf;
@@ -193,12 +234,12 @@ static void draw_details(ui_app *app)
     }
     (void)werase(w);
     ui_draw_panel(w, "Details");
-    if (g_count == 0) {
+    if (g_visible_count == 0) {
         (void)wnoutrefresh(w);
         return;
     }
     int inner_width = getmaxx(w) - 2;
-    const bsrc_source *src = &g_sources[g_list.selected];
+    const bsrc_source *src = g_visible[g_list.selected];
 
     buf line1;
     buf_init(&line1);
@@ -231,13 +272,13 @@ static void draw(ui_app *app)
         return;
     }
     (void)werase(w);
-    ui_draw_panel(w, "Base sources");
+    ui_draw_panel(w, g_filter[0] != '\0' ? "Base sources (filtered)" : "Base sources");
     int inner_width = getmaxx(w) - 2;
     (void)mvwaddnstr(w, 1, 1, "Version   Origin                                   DL  Instances",
                      inner_width);
 
     int inner_height = getmaxy(w) - 2;
-    ui_list_draw(&g_list, w, 2, inner_height - 1, inner_width, g_count, draw_row, app);
+    ui_list_draw(&g_list, w, 2, inner_height - 1, inner_width, g_visible_count, draw_row, app);
     (void)wnoutrefresh(w);
 
     draw_details(app);
@@ -246,6 +287,11 @@ static void draw(ui_app *app)
         ui_set_status(app, "%s", g_action_status);
     } else if (g_count == 0) {
         ui_set_status(app, "no base sources yet -- n picks a known version, or a/t/g add your own");
+    } else if (g_visible_count == 0) {
+        ui_set_status(app, "no base source matches \"%s\"", g_filter);
+    } else if (g_filter[0] != '\0') {
+        ui_set_status(app, "%zu of %zu base source%s, filtered", g_visible_count, g_count,
+                      g_count == 1 ? "" : "s");
     } else {
         ui_set_status(app, "%zu base source%s", g_count, g_count == 1 ? "" : "s");
     }
@@ -460,10 +506,10 @@ static void do_add_git(ui_app *app)
 
 static void do_remove(ui_app *app)
 {
-    if (g_count == 0) {
+    if (g_visible_count == 0) {
         return;
     }
-    char *version = str_dup(g_sources[g_list.selected].version);
+    char *version = str_dup(g_visible[g_list.selected]->version);
     size_t used = usage_count(version);
 
     char message[400];
@@ -489,14 +535,31 @@ static void do_remove(ui_app *app)
     nhp_err err = bsrc_remove(version);
     if (err == NHP_OK) {
         set_action_status(app, "removed base source %s", version);
-        reload();
-        if (g_count > 0 && g_list.selected >= g_count) {
-            g_list.selected = g_count - 1;
-        }
+        reload(); /* recompute_visible() resets selection; the removed entry is gone either way */
     } else {
         set_action_status(app, "could not remove %s: %s", version, err_get());
     }
     free(version);
+}
+
+static void on_search_change(ui_app *app, const char *text)
+{
+    (void)app;
+    (void)snprintf(g_filter, sizeof(g_filter), "%s", text);
+    recompute_visible();
+}
+
+/* "/": live-filters by version/origin, same widget and Esc-clears
+ * convention as scr_db.c/scr_library.c. No "n"/"N" next-match aliases
+ * here -- both letters are already taken (Known version / nothing free). */
+static void do_search(ui_app *app)
+{
+    char search_text[256];
+    (void)snprintf(search_text, sizeof(search_text), "%s", g_filter);
+    bool committed = ui_show_popup_input_live(app, "Search (version, origin)", search_text,
+                                              sizeof(search_text), draw, on_search_change);
+    (void)snprintf(g_filter, sizeof(g_filter), "%s", committed ? search_text : "");
+    recompute_visible();
 }
 
 static bool handle_key(ui_app *app, wint_t ch)
@@ -504,28 +567,32 @@ static bool handle_key(ui_app *app, wint_t ch)
     WINDOW *w = app->layout.main_win;
     int visible = (w != NULL) ? getmaxy(w) - 3 : 1;
 
+    if (ch == L'/') {
+        do_search(app);
+        return true;
+    }
     if (ch == KEY_UP || ch == L'k') {
-        ui_list_move(&g_list, -1, g_count, visible);
+        ui_list_move(&g_list, -1, g_visible_count, visible);
         return true;
     }
     if (ch == KEY_DOWN || ch == L'j') {
-        ui_list_move(&g_list, 1, g_count, visible);
+        ui_list_move(&g_list, 1, g_visible_count, visible);
         return true;
     }
     if (ch == KEY_PPAGE) {
-        ui_list_move(&g_list, -visible, g_count, visible);
+        ui_list_move(&g_list, -visible, g_visible_count, visible);
         return true;
     }
     if (ch == KEY_NPAGE) {
-        ui_list_move(&g_list, visible, g_count, visible);
+        ui_list_move(&g_list, visible, g_visible_count, visible);
         return true;
     }
     if (ch == KEY_HOME) {
-        ui_list_move(&g_list, -(int)g_count, g_count, visible);
+        ui_list_move(&g_list, -(int)g_visible_count, g_visible_count, visible);
         return true;
     }
     if (ch == KEY_END) {
-        ui_list_move(&g_list, (int)g_count, g_count, visible);
+        ui_list_move(&g_list, (int)g_visible_count, g_visible_count, visible);
         return true;
     }
     if (ch == L'n') {
@@ -555,7 +622,7 @@ const ui_screen scr_sources = {
     .name = "Sources",
     .nav_letter = 's',
     .key_bar = "Tab/Left menu  n Known version  a Add folder  t Add tarball  g Add git tag  "
-               "x Remove",
+               "x Remove  / Search",
     .enter = enter,
     .leave = leave,
     .draw = draw,

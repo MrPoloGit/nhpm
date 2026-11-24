@@ -23,6 +23,44 @@ static inst_instance *g_instances = NULL;
 static size_t g_count = 0;
 static ui_list g_list;
 
+/* "/" search (13.9): a true filter, same as Sources -- Instances has no
+ * J/K-style reordering either. Pointers into g_instances, rebuilt by
+ * recompute_visible() on every filter change and reload(). */
+static char g_filter[256] = "";
+static const inst_instance **g_visible = NULL;
+static size_t g_visible_count = 0;
+
+/* Against name/source/recipe/notes. Keeps the same instance selected if
+ * it's still visible, instead of snapping to the top on every keystroke. */
+static void recompute_visible(void)
+{
+    const inst_instance *kept = (g_visible_count > 0 && g_list.selected < g_visible_count)
+                                    ? g_visible[g_list.selected]
+                                    : NULL;
+    free(g_visible);
+    g_visible = malloc((g_count > 0 ? g_count : 1) * sizeof(*g_visible));
+    g_visible_count = 0;
+    if (g_visible == NULL) {
+        return;
+    }
+    for (size_t i = 0; i < g_count; i++) {
+        const char *fields[] = {g_instances[i].name, g_instances[i].source,
+                                g_instances[i].recipe, g_instances[i].notes};
+        if (str_matches_all_words(g_filter, fields, 4)) {
+            g_visible[g_visible_count++] = &g_instances[i];
+        }
+    }
+    ui_list_init(&g_list);
+    if (kept != NULL) {
+        for (size_t i = 0; i < g_visible_count; i++) {
+            if (g_visible[i] == kept) {
+                g_list.selected = i;
+                break;
+            }
+        }
+    }
+}
+
 static void reload(void)
 {
     if (g_instances != NULL) {
@@ -31,7 +69,7 @@ static void reload(void)
         g_count = 0;
     }
     (void)inst_list(&g_instances, &g_count);
-    ui_list_init(&g_list);
+    recompute_visible();
 }
 
 static void enter(ui_app *app)
@@ -48,6 +86,9 @@ static void leave(ui_app *app)
         g_instances = NULL;
         g_count = 0;
     }
+    free(g_visible);
+    g_visible = NULL;
+    g_visible_count = 0;
 }
 
 static void built_column(const inst_instance *inst, char *out, size_t out_size)
@@ -83,7 +124,7 @@ typedef struct row_context {
 static void draw_row(WINDOW *win, int y, int width, size_t index, bool selected, void *user_data)
 {
     const row_context *ctx = user_data;
-    const inst_instance *inst = &g_instances[index];
+    const inst_instance *inst = g_visible[index];
 
     size_t enabled = 0;
     for (size_t i = 0; i < inst->patch_count; i++) {
@@ -154,12 +195,12 @@ static void draw_details(ui_app *app)
     }
     (void)werase(w);
     ui_draw_panel(w, "Details");
-    if (g_count == 0) {
+    if (g_visible_count == 0) {
         (void)wnoutrefresh(w);
         return;
     }
     int inner_width = getmaxx(w) - 2;
-    const inst_instance *inst = &g_instances[g_list.selected];
+    const inst_instance *inst = g_visible[g_list.selected];
     if (inst->notes[0] != '\0') {
         (void)mvwaddnstr(w, 1, 1, inst->notes, inner_width);
     }
@@ -182,20 +223,25 @@ static void draw(ui_app *app)
         return;
     }
     (void)werase(w);
-    ui_draw_panel(w, "Instances");
+    ui_draw_panel(w, g_filter[0] != '\0' ? "Instances (filtered)" : "Instances");
     int inner_width = getmaxx(w) - 2;
     (void)mvwaddnstr(w, 1, 1, "Name               Version  Patches Built        Last played",
                      inner_width);
 
     int inner_height = getmaxy(w) - 2;
     row_context ctx = {.app = app};
-    ui_list_draw(&g_list, w, 2, inner_height - 1, inner_width, g_count, draw_row, &ctx);
+    ui_list_draw(&g_list, w, 2, inner_height - 1, inner_width, g_visible_count, draw_row, &ctx);
     (void)wnoutrefresh(w);
 
     draw_details(app);
 
     if (g_count == 0) {
         ui_set_status(app, "no instances yet -- press n to create one");
+    } else if (g_visible_count == 0) {
+        ui_set_status(app, "no instance matches \"%s\"", g_filter);
+    } else if (g_filter[0] != '\0') {
+        ui_set_status(app, "%zu of %zu instance%s, filtered", g_visible_count, g_count,
+                      g_count == 1 ? "" : "s");
     }
 }
 
@@ -327,10 +373,10 @@ static void do_new(ui_app *app)
 
 static void do_clone(ui_app *app)
 {
-    if (g_count == 0) {
+    if (g_visible_count == 0) {
         return;
     }
-    char *old_name = str_dup(g_instances[g_list.selected].name);
+    char *old_name = str_dup(g_visible[g_list.selected]->name);
 
     char new_name[256] = "";
     if (!ui_show_popup_input(app, "Clone, new name: ", new_name, sizeof(new_name), draw) ||
@@ -353,10 +399,10 @@ static void do_clone(ui_app *app)
 
 static void do_rename(ui_app *app)
 {
-    if (g_count == 0) {
+    if (g_visible_count == 0) {
         return;
     }
-    char *old_name = str_dup(g_instances[g_list.selected].name);
+    char *old_name = str_dup(g_visible[g_list.selected]->name);
     bool was_active = str_eq(app->active_name, old_name);
 
     /* docs/features.md 10.5: refused while locked -- but only checkable
@@ -395,10 +441,10 @@ static void do_rename(ui_app *app)
 
 static void do_delete(ui_app *app)
 {
-    if (g_count == 0) {
+    if (g_visible_count == 0) {
         return;
     }
-    char *name = str_dup(g_instances[g_list.selected].name);
+    char *name = str_dup(g_visible[g_list.selected]->name);
     bool was_active = str_eq(app->active_name, name);
     if (was_active && !ui_require_write_access(app)) {
         free(name);
@@ -435,10 +481,7 @@ static void do_delete(ui_app *app)
             app->active_read_only = false;
             app->active_lock_other_pid = 0;
         }
-        reload();
-        if (g_count > 0 && g_list.selected >= g_count) {
-            g_list.selected = g_count - 1;
-        }
+        reload(); /* recompute_visible() resets selection; the deleted entry is gone either way */
     } else {
         ui_set_status(app, "could not delete %s: %s", name, err_get());
     }
@@ -503,10 +546,10 @@ static void draw_snapshot_dialog(ui_app *app, const char *inst_name, const inst_
  * app->text_input_active, since ui_show_popup_input() leaves it false on return. */
 static void do_snapshots(ui_app *app)
 {
-    if (g_count == 0) {
+    if (g_visible_count == 0) {
         return;
     }
-    char *inst_name = str_dup(g_instances[g_list.selected].name);
+    char *inst_name = str_dup(g_visible[g_list.selected]->name);
 
     inst_snapshot *snaps = NULL;
     size_t count = 0;
@@ -639,10 +682,10 @@ static void do_snapshots(ui_app *app)
 
 static void do_export(ui_app *app)
 {
-    if (g_count == 0) {
+    if (g_visible_count == 0) {
         return;
     }
-    char *name = str_dup(g_instances[g_list.selected].name);
+    char *name = str_dup(g_visible[g_list.selected]->name);
 
     char path[512];
     (void)snprintf(path, sizeof(path), "%s.nhinst", name);
@@ -708,10 +751,10 @@ static char *today_date(void)
  * the CLI's --out/--to-library/--flatten, just asked one at a time. */
 static void do_combined(ui_app *app)
 {
-    if (g_count == 0) {
+    if (g_visible_count == 0) {
         return;
     }
-    const inst_instance *inst = &g_instances[g_list.selected];
+    const inst_instance *inst = g_visible[g_list.selected];
 
     mkp_combined_result result;
     nhp_err err = mkp_combined(inst, NULL, 0, app->config.ignore, &result);
@@ -812,40 +855,65 @@ static void do_combined(ui_app *app)
     mkp_combined_result_free(&result);
 }
 
+static void on_search_change(ui_app *app, const char *text)
+{
+    (void)app;
+    (void)snprintf(g_filter, sizeof(g_filter), "%s", text);
+    recompute_visible();
+}
+
+/* "/": live-filters by name/source/recipe/notes, same widget and
+ * Esc-clears convention as scr_db.c/scr_library.c. No "n"/"N" aliases --
+ * "n" is already New here, and "N" isn't used anywhere else to match it. */
+static void do_search(ui_app *app)
+{
+    char search_text[256];
+    (void)snprintf(search_text, sizeof(search_text), "%s", g_filter);
+    bool committed = ui_show_popup_input_live(app, "Search (name, version, recipe, notes)",
+                                              search_text, sizeof(search_text), draw,
+                                              on_search_change);
+    (void)snprintf(g_filter, sizeof(g_filter), "%s", committed ? search_text : "");
+    recompute_visible();
+}
+
 static bool handle_key(ui_app *app, wint_t ch)
 {
     WINDOW *w = app->layout.main_win;
     int visible = (w != NULL) ? getmaxy(w) - 3 : 1;
 
+    if (ch == L'/') {
+        do_search(app);
+        return true;
+    }
     if (ch == KEY_UP || ch == L'k') {
-        ui_list_move(&g_list, -1, g_count, visible);
+        ui_list_move(&g_list, -1, g_visible_count, visible);
         return true;
     }
     if (ch == KEY_DOWN || ch == L'j') {
-        ui_list_move(&g_list, 1, g_count, visible);
+        ui_list_move(&g_list, 1, g_visible_count, visible);
         return true;
     }
     if (ch == KEY_PPAGE) {
-        ui_list_move(&g_list, -visible, g_count, visible);
+        ui_list_move(&g_list, -visible, g_visible_count, visible);
         return true;
     }
     if (ch == KEY_NPAGE) {
-        ui_list_move(&g_list, visible, g_count, visible);
+        ui_list_move(&g_list, visible, g_visible_count, visible);
         return true;
     }
     if (ch == KEY_HOME) {
-        ui_list_move(&g_list, -(int)g_count, g_count, visible);
+        ui_list_move(&g_list, -(int)g_visible_count, g_visible_count, visible);
         return true;
     }
     if (ch == KEY_END) {
-        ui_list_move(&g_list, (int)g_count, g_count, visible);
+        ui_list_move(&g_list, (int)g_visible_count, g_visible_count, visible);
         return true;
     }
     if (ch == L'\n' || ch == KEY_ENTER) {
-        if (g_count == 0) {
+        if (g_visible_count == 0) {
             return true;
         }
-        const inst_instance *inst = &g_instances[g_list.selected];
+        const inst_instance *inst = g_visible[g_list.selected];
         nhp_err err = cfg_set_active_instance(inst->name);
         if (err == NHP_OK) {
             ui_reload_active_instance(app);
@@ -898,7 +966,7 @@ const ui_screen scr_instances = {
     .name = "Instances",
     .nav_letter = 'i',
     .key_bar = "Tab/Left menu  Enter activate  n New  c Clone  r Rename  x Delete  t Snapshots  "
-               "e Export  i Import  C Combined  p Play",
+               "e Export  i Import  C Combined  p Play  / Search",
     .enter = enter,
     .leave = leave,
     .draw = draw,

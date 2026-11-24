@@ -49,6 +49,10 @@ planned to working, move it here instead of leaving the gap implicit.
       fit (a name, a path, a git tag). Every text entry in the UI goes through this (or
       `ui_show_popup_input_live()` for a live filter, e.g. `/` search) -- nothing prompts in
       the status line except `ui_confirm()`'s y/N
+- [x] `str_matches_all_words()` (util.c): the "plain words match N fields, all must match"
+      rule Database/Library's own search already used, generalized and shared. Backs the new
+      `/` search on Instances, Patches and Sources -- those don't need the full `v:`/`a:`/
+      `r:` mini-language idx_query_parse() has, just plain words against their own columns
 - [x] `ui_show_conflict()`: on any `NHP_ECONFLICT`, shows the patch id/version, per-file hunk
       tally, and raw quilt/patch output (section 11.6's "view the failing hunks") in
       `ui_show_text_dialog()`. Wired into every conflict site: Patches' Space/J/K/x,
@@ -87,6 +91,11 @@ screen below).
 - [x] `p` Play (`ui_suspend_and_run_play()`, ui.c/screen.h): runs the active instance's
       installed game and returns to nhpm when it exits; `last_played` is updated. Instances-
       only, not a global key like `?`/`q` -- it was global at first, moved here on request
+- [x] `/` search (name/version/recipe/notes, plain words, all must match): a true filter like
+      Database/Library, hiding non-matching rows -- Instances has no J/K-style reordering, so
+      unlike Patches there's no ambiguity in hiding rows. `g_visible` (pointers into the real
+      `g_instances`) is what every action actually reads/writes by selection now, not the raw
+      array directly, so removing/renaming the selected row still touches the right instance
 - [x] `n` New: popups for name, Managed/Linked kind, then (Managed) base source version or
       (Linked) folder, then build recipe (Esc there defaults to "custom"); the new instance
       becomes active immediately (same as pressing Enter on it), so the next patch/build/play
@@ -206,6 +215,12 @@ screen below).
       11.9), read-only, best-effort via library `files_touched` (also part of CLI's `nhpm
       status --check`). The details area shows which other enabled patches share a file
       with the selected one, in `UI_COLOR_WARN`
+- [x] `/` search (id/name/version/target, plain words, all must match) and `n` jump to the
+      next match, wrapping -- highlights (`A_BOLD`) rather than hides, unlike Database/
+      Library/Instances/Sources: row position here is the real Quilt stack order J/K's "one
+      slot" move depends on, so hiding rows could make J/K silently skip past several real
+      positions at once. `n` is the only way to reach a match (not an alias for `j` the way
+      Database's own `n` is); `N` stays "new patch" since it was already taken
 
 **F6 Build** -- done
 - [x] `b` runs the active instance's recipe (`build_run()`), streaming each line into the
@@ -270,6 +285,9 @@ screen below).
 - [x] Same sticky-status fix as Foundation above, applied here first: a redraw right after
       `a`/`t`/`g`/`x` no longer overwrites that action's own result message with the generic
       "%zu base source(s)" line
+- [x] `/` search (version/origin, plain words, all must match): a true filter like Database/
+      Library/Instances. No `n`/`N` next-match aliases -- `n` is already Known version here,
+      and there's no second free letter left to pair with it
 
 **Changes dialog** (`scr_changes.c`, docs/features.md 12.5) -- done, opened by `w` on Patches
 or `m` on Library
@@ -306,8 +324,3 @@ or `m` on Library
   self-tested via tmux in this project going forward).
 
 ## Issues
-
-- search feature on database isnt working
-- search for patches page too
-- search for Sources
-- add search to Instances page
