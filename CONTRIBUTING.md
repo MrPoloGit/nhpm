@@ -62,6 +62,15 @@ whichever are on `PATH` -- a convenient way to catch what CI would catch before 
 - **Commits:** a short imperative summary (≤ 72 chars), blank line, then why. One logical
   change per commit; formatting-only changes go in their own commit.
 
+## Releasing
+
+Tags/releases use semver: `major.minor.patch` (e.g. `0.1.0`), optionally prefixed with `v`.
+Publishing a GitHub release (not just creating a draft) triggers
+[release.yml](.github/workflows/release.yml), which builds, tests, and uploads
+Linux/macOS binaries for that tag; the tag name becomes `nhpm --version`'s output
+(`NHPM_VERSION`, see the `VERSION` comment in the Makefile) and what
+`update_version_compare()` (`src/update.c`) compares against to detect newer releases.
+
 ## Where things live
 
 - [docs/repo-structure.md](docs/repo-structure.md) — source layout and module boundaries.

@@ -9,7 +9,7 @@ BUILD_DIR := build
 # git checkout. Passed through to CMakeLists.txt, which has the same fallback.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null)
 ifeq ($(strip $(VERSION)),)
-VERSION := 0.1
+VERSION := 1.0.0
 endif
 
 # Flags, pkg-config lookup and source list live in CMakeLists.txt (docs/style.md

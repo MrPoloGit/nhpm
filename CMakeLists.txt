@@ -29,7 +29,7 @@ if(NOT VERSION)
     endif()
 endif()
 if(NOT VERSION)
-    set(VERSION "0.1")
+    set(VERSION "1.0.0")
 endif()
 
 # Homebrew's ncurses is keg-only; panelw.pc isn't on the default pkg-config path
