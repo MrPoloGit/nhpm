@@ -14,6 +14,11 @@ the command-line mode and the ncurses interface (milestone M7) are functional --
 (Instances, Database, Library, Patches, Build, Sources, the Changes dialog) work; see
 [docs/ui-progress.md](docs/ui-progress.md) for exactly what's done and what's left in each.
 
+<p align="center">
+  <img src="docs/images/build-result-343.png" alt="Result of building Nethack 3.4.3"><br>
+  <em>Result of building Nethack 3.4.3</em>
+</p>
+
 ## Building
 
 Needs a C11 compiler, CMake, `ncursesw`+`panel`, `libcurl`, `libxml2` (headers and
