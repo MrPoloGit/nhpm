@@ -17,8 +17,8 @@ jobs:
         include:
           - os: ubuntu-latest
             asset: linux-x86_64
-          - os: macos-13
-            asset: macos-x86_64
+          - os: ubuntu-24.04-arm
+            asset: linux-arm64
           - os: macos-latest
             asset: macos-arm64
     runs-on: ${{ matrix.os }}
@@ -51,6 +51,22 @@ jobs:
           cp nhpm README.md LICENSE "$dir"/
           tar -czf "${dir}.tar.gz" "$dir"
           echo "ASSET_PATH=${dir}.tar.gz" >> "$GITHUB_ENV"
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${GITHUB_REF_NAME}" "${ASSET_PATH}" --clobber
+
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package source
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          git archive --format=zip --prefix="nhpm-${tag}/" -o "nhpm-${tag}-source.zip" HEAD
+          echo "ASSET_PATH=nhpm-${tag}-source.zip" >> "$GITHUB_ENV"
 
       - name: Upload release asset
         env:

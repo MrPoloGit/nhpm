@@ -21,8 +21,9 @@ it exists, see the [root README](../README.md); for how it's built internally, s
 ## 1. Installing
 
 **From a release:** download the `nhpm-<version>-<platform>.tar.gz` asset for your OS
-(`linux-x86_64`, `macos-x86_64`, `macos-arm64`) from the project's GitHub releases page, untar
-it, and put the `nhpm` binary on your `PATH`.
+(`linux-x86_64`, `linux-arm64`, `macos-arm64`) from the project's GitHub releases page, untar
+it, and put the `nhpm` binary on your `PATH`. A `nhpm-<version>-source.zip` is also attached,
+for building from a specific release's source without cloning the repo.
 
 **From source:** needs a C11 compiler, CMake, `ncursesw`+`panel`, `libcurl`, `libxml2`
 (headers and libraries), plus `quilt`, `patch`, `make`, `tar`/`gzip`/`unzip`, `diff` and
