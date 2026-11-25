@@ -1,6 +1,8 @@
 # Contributing to nhpm
 
-Full details live in [docs/style.md](docs/style.md); this is the short version.
+Full details live in [docs/style.md](docs/style.md); this is the short version. Filing a bug
+report or feature request? See [docs/issue-format.md](docs/issue-format.md). Opening a pull
+request? See [docs/pr-format.md](docs/pr-format.md).
 
 ## Building and testing
 
@@ -74,6 +76,8 @@ for that tag: `linux-x86_64`, `linux-arm64` and `macos-arm64` binary tarballs, p
 
 ## Where things live
 
+- [docs/issue-format.md](docs/issue-format.md) — what to include in a bug report or feature request.
+- [docs/pr-format.md](docs/pr-format.md) — what a pull request should look like.
 - [docs/repo-structure.md](docs/repo-structure.md) — source layout and module boundaries.
 - [docs/file-formats.md](docs/file-formats.md) — on-disk files and their formats.
 - [docs/features.md](docs/features.md) — what nhpm does, feature by feature.

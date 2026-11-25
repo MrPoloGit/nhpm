@@ -39,7 +39,9 @@ and what you should run too -- see CONTRIBUTING.md. Calling `cmake`/`ctest` dire
 works, for IDEs or other generators.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the rest of the development workflow (formatting,
-linting, the debug/sanitizer build) and a short version of the code style rules.
+linting, the debug/sanitizer build) and a short version of the code style rules. Filing an
+issue or a pull request? See [docs/issue-format.md](docs/issue-format.md) and
+[docs/pr-format.md](docs/pr-format.md).
 
 ## License
 
