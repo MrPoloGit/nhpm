@@ -35,7 +35,14 @@ jobs:
 
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
-        run: brew install cmake ncurses curl libxml2 pkg-config quilt
+        run: |
+          brew install cmake ncurses curl libxml2 pkg-config quilt
+          # quilt pulls in GNU patch as a keg-only 'gpatch' dependency, which
+          # doesn't shadow Apple's BSD-derived /usr/bin/patch on its own; both
+          # quilt itself and nhpm need literal 'patch' to be the GNU one
+          # (docs/tools-libraries.md section 3).
+          ln -sf "$(brew --prefix gpatch)/bin/gpatch" "$(brew --prefix)/bin/patch"
+          echo "$(brew --prefix)/bin" >> "$GITHUB_PATH"
 
       - name: Build
         run: make VERSION="${GITHUB_REF_NAME}" CFLAGS="-O2 -Werror"
