@@ -88,8 +88,7 @@ static void print_usage(FILE *out)
     (void)fprintf(out, "       nhpm export-patch <id>[@version] [FILE]\n");
     (void)fprintf(out, "       nhpm update-check\n");
     (void)fprintf(out, "\n");
-    (void)fprintf(out, "Run with no arguments to start the ncurses interface (docs/features.md\n");
-    (void)fprintf(out, "section 13).\n");
+    (void)fprintf(out, "Run with no arguments to start the ncurses interface.");
 }
 
 /* Opens the log file at ~/.cache/nhpm/nhpm.log, creating its directory
