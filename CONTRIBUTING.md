@@ -68,9 +68,10 @@ whichever are on `PATH` -- a convenient way to catch what CI would catch before 
 
 Tags/releases use semver: `major.minor.patch` (e.g. `0.1.0`), optionally prefixed with `v`.
 Publishing a GitHub release (not just creating a draft) triggers
-[release.yml](.github/workflows/release.yml), which builds, tests, and uploads four assets
-for that tag: `linux-x86_64`, `linux-arm64` and `macos-arm64` binary tarballs, plus a
-`git archive` zip of the source; the tag name becomes `nhpm --version`'s output
+[release.yml](.github/workflows/release.yml), which builds, tests, and uploads
+`linux-x86_64`, `linux-arm64` and `macos-arm64` binary tarballs for that tag (GitHub already
+attaches its own source zip/tarball to every release, so nothing extra is needed for that);
+the tag name becomes `nhpm --version`'s output
 (`NHPM_VERSION`, see the `VERSION` comment in the Makefile) and what
 `update_version_compare()` (`src/update.c`) compares against to detect newer releases.
 
