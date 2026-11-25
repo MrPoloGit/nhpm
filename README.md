@@ -8,7 +8,9 @@ create saved **instances**: named NetHack setups, each with its own version, its
 list of patches, its own build and its own save games. It can also turn an instance into one
 combined patch, and turn your own changes to the NetHack code into a proper patch.
 
-See [docs/nhpm-plan.md](docs/nhpm-plan.md) for the full plan and
+See [docs/README.md](docs/README.md) for the user guide: installing, a quickstart, the
+ncurses interface's keybindings, and the full CLI reference. See
+[docs/nhpm-plan.md](docs/nhpm-plan.md) for the full plan and
 [docs/features.md](docs/features.md) for what it does, feature by feature. **Status:** both
 the command-line mode and the ncurses interface (milestone M7) are functional -- most screens
 (Instances, Database, Library, Patches, Build, Sources, the Changes dialog) work; see

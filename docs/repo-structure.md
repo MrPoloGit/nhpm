@@ -11,8 +11,10 @@ module implements.
 ```
 nhpm/
 ├── Makefile
+├── CMakeLists.txt
 ├── README.md
-├── doc/nhpm.1
+├── CONTRIBUTING.md
+├── docs/               # development plan, feature spec, and docs/README.md (the user guide)
 ├── src/
 │   ├── feature.h       # _XOPEN_SOURCE and portability macros, included first everywhere
 │   ├── main.c          # arguments, start UI or run CLI command
@@ -32,8 +34,10 @@ nhpm/
 │   ├── build.c/.h      # build recipes, run build, stream output, launch game
 │   ├── mkpatch.c/.h    # combined patches, capture changes, patch from folder/git,
 │   │                   #   ignore rules, header writing, verification
+│   ├── update.c/.h     # checks GitHub releases for a newer nhpm version
 │   └── ui/
 │       ├── ui.c/.h         # ncurses setup/teardown, colors, main loop, resize, key bar
+│       ├── screen.h        # the ui_screen interface every scr_*.c implements
 │       ├── widgets.c/.h    # list view, text view, input line, progress, dialogs
 │       ├── scr_instances.c
 │       ├── scr_db.c
@@ -45,11 +49,7 @@ nhpm/
 │       └── scr_help.c
 └── tests/
     ├── fixtures/       # saved HTML pages, sample diffs, a tiny fake NetHack source
-    ├── test_site.c
-    ├── test_index.c
-    ├── test_version.c
-    ├── test_instance.c
-    ├── test_stack.c    # needs quilt installed
+    ├── test_<module>.c # one per src/ module above (test_stack.c needs quilt installed)
     └── run.sh
 ```
 
@@ -63,6 +63,8 @@ nhpm/
 
 The repository root also holds the style and tool configuration from section 6:
 `.clang-format`, `.clang-tidy`, `.editorconfig`, and `CONTRIBUTING.md` (a short copy of
-section 6 for contributors).
+section 6 for contributors). `docs/README.md` is the user-facing guide (installing, the CLI,
+the ncurses interface); everything else under `docs/` (this file included) is the development
+plan and spec. There's no man page yet -- `nhpm-plan.md`'s M8 milestone tracks it.
 
 ---
